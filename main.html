@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Leitor Limpo</title>
+
+<!-- PWA: manifest inline via data URL (Chrome aceita) -->
+<link rel="manifest" href='data:application/manifest+json,{"name":"Leitor Limpo","short_name":"Leitor","start_url":".","display":"standalone","background_color":"%23ffffff","theme_color":"%23111111","icons":[{"src":"data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 192 192%27%3E%3Crect width=%27192%27 height=%27192%27 fill=%27%23111%27/%3E%3Ctext x=%2796%27 y=%27120%27 font-size=%2790%27 text-anchor=%27middle%27 fill=%27white%27 font-family=%27sans-serif%27%3EL%3C/text%3E%3C/svg%3E","sizes":"192x192","type":"image/svg+xml"}]}'>
+
+<!-- iOS -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Leitor">
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' fill='%23111'/%3E%3Ctext x='90' y='115' font-size='85' text-anchor='middle' fill='white' font-family='sans-serif'%3EL%3C/text%3E%3C/svg%3E">
+
+<style>
+  :root { --bg:#fff; --fg:#111; --muted:#666; --line:#e5e5e5; --accent:#111; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#111; --fg:#eee; --muted:#aaa; --line:#333; --accent:#eee; }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 16px; padding-top: max(16px, env(safe-area-inset-top));
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--fg); line-height: 1.55;
+    max-width: 760px; margin-inline: auto;
+  }
+  h1 { font-size: 20px; margin: 0 0 12px; }
+  .row { display: flex; gap: 8px; }
+  input[type=url] {
+    flex: 1; font-size: 16px; padding: 12px; border: 1px solid var(--line);
+    border-radius: 8px; background: var(--bg); color: var(--fg); min-width: 0;
+  }
+  button {
+    font-size: 16px; padding: 12px 16px; border: none; border-radius: 8px;
+    background: var(--accent); color: var(--bg); cursor: pointer; white-space: nowrap;
+  }
+  button:disabled { opacity: .5; cursor: wait; }
+  .actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .actions button { font-size: 13px; padding: 8px 12px; background: transparent; color: var(--muted); border: 1px solid var(--line); }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 10px; }
+  #status { font-size: 14px; color: var(--muted); margin-top: 14px; min-height: 20px; }
+  #output {
+    margin-top: 16px; white-space: pre-wrap; word-wrap: break-word;
+    font-size: 17px; line-height: 1.65;
+  }
+  #output img { max-width: 100%; height: auto; border-radius: 6px; }
+  #output a { color: inherit; }
+  #output h1, #output h2, #output h3 { line-height: 1.25; margin-top: 1.4em; }
+  #output pre, #output code { background: rgba(127,127,127,.12); padding: 2px 4px; border-radius: 4px; font-size: 14px; overflow-x: auto; }
+  #output pre { padding: 10px; }
+  #output blockquote { border-left: 3px solid var(--line); margin: 0; padding-left: 12px; color: var(--muted); }
+  hr { border: none; border-top: 1px solid var(--line); margin: 16px 0; }
+  .hidden { display: none; }
+  .history { margin-top: 24px; font-size: 14px; }
+  .history h2 { font-size: 14px; color: var(--muted); font-weight: 600; margin: 0 0 8px; text-transform: uppercase; letter-spacing: .04em; }
+  .history a { display: block; padding: 8px 0; border-bottom: 1px solid var(--line); color: var(--fg); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+</style>
+</head>
+<body>
+
+<h1>Leitor Limpo</h1>
+
+<div class="row">
+  <input type="url" id="url" placeholder="Cole a URL do artigo" autocomplete="off" autocapitalize="off" spellcheck="false">
+  <button id="go">Ler</button>
+</div>
+
+<div class="actions">
+  <button id="btnArchive">Abrir no archive.ph</button>
+  <button id="btnClear">Limpar histórico</button>
+</div>
+
+<p class="hint">Extrai o texto via r.jina.ai. Se falhar, use os botões de fallback acima.</p>
+
+<div id="status"></div>
+<article id="output"></article>
+
+<div class="history hidden" id="historyBox">
+  <h2>Recentes</h2>
+  <div id="historyList"></div>
+</div>
+
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const input = $('url'), goBtn = $('go'), status = $('status'), output = $('output');
+  const historyBox = $('historyBox'), historyList = $('historyList');
+  const KEY = 'leitor_limpo_history_v1';
+
+  // --- Histórico ---
+  function getHistory() {
+    try { return JSON.parse(localStorage.getItem(KEY) || '[]'); } catch { return []; }
+  }
+  function saveHistory(url, title) {
+    let h = getHistory().filter(x => x.url !== url);
+    h.unshift({ url, title: title || url, ts: Date.now() });
+    h = h.slice(0, 20);
+    localStorage.setItem(KEY, JSON.stringify(h));
+    renderHistory();
+  }
+  function renderHistory() {
+    const h = getHistory();
+    if (!h.length) { historyBox.classList.add('hidden'); return; }
+    historyBox.classList.remove('hidden');
+    historyList.innerHTML = '';
+    h.forEach(item => {
+      const a = document.createElement('a');
+      a.href = '#';
+      a.textContent = item.title;
+      a.title = item.url;
+      a.onclick = (e) => { e.preventDefault(); input.value = item.url; load(); };
+      historyList.appendChild(a);
+    });
+  }
+  $('btnClear').onclick = () => { localStorage.removeItem(KEY); renderHistory(); };
+
+  // --- Markdown mínimo -> HTML (r.jina.ai retorna Markdown) ---
+  function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function mdToHtml(md) {
+    // Remove bloco de metadados do Jina (Title:, URL Source:, Markdown Content:)
+    md = md.replace(/^Title:\s*/m, '').replace(/^URL Source:\s*.*$/m, '').replace(/^Markdown Content:\s*$/m, '');
+    const lines = md.split('\n');
+    let html = '', inCode = false, para = [];
+    const flushPara = () => {
+      if (para.length) { html += '<p>' + inline(para.join(' ')) + '</p>'; para = []; }
+    };
+    const inline = (t) => {
+      t = esc(t);
+      t = t.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img alt="$1" src="$2">');
+      t = t.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+      t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+      t = t.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+      t = t.replace(/`([^`]+)`/g, '<code>$1</code>');
+      return t;
+    };
+    for (const raw of lines) {
+      const line = raw;
+      if (/^```/.test(line)) { flushPara(); inCode = !inCode; html += inCode ? '<pre>' : '</pre>'; continue; }
+      if (inCode) { html += esc(line) + '\n'; continue; }
+      if (/^#{1,6}\s/.test(line)) {
+        flushPara();
+        const m = line.match(/^(#{1,6})\s+(.*)$/);
+        html += `<h${m[1].length}>${inline(m[2])}</h${m[1].length}>`;
+        continue;
+      }
+      if (/^\s*[-*+]\s/.test(line)) { flushPara(); html += '<li>' + inline(line.replace(/^\s*[-*+]\s/, '')) + '</li>'; continue; }
+      if (/^\s*>\s/.test(line)) { flushPara(); html += '<blockquote>' + inline(line.replace(/^\s*>\s/, '')) + '</blockquote>'; continue; }
+      if (/^---+$/.test(line.trim())) { flushPara(); html += '<hr>'; continue; }
+      if (line.trim() === '') { flushPara(); continue; }
+      para.push(line.trim());
+    }
+    flushPara();
+    if (inCode) html += '</pre>';
+    return html;
+  }
+
+  function extractTitle(md) {
+    const t = md.match(/^Title:\s*(.+)$/m);
+    if (t) return t[1].trim();
+    const h = md.match(/^#\s+(.+)$/m);
+    return h ? h[1].trim() : null;
+  }
+
+  // --- Carregar artigo ---
+  async function load() {
+    const url = input.value.trim();
+    if (!url) { status.textContent = 'Cole uma URL primeiro.'; return; }
+    output.innerHTML = '';
+    status.textContent = 'Extraindo… (pode levar alguns segundos)';
+    goBtn.disabled = true;
+    try {
+      const res = await fetch('https://r.jina.ai/' + url, { headers: { 'Accept': 'text/plain' } });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const text = await res.text();
+      if (!text || text.length < 200) throw new Error('Conteúdo muito curto ou vazio');
+      const title = extractTitle(text) || url;
+      output.innerHTML = mdToHtml(text);
+      status.textContent = 'Pronto. ' + text.length + ' caracteres extraídos.';
+      document.title = title + ' — Leitor Limpo';
+      saveHistory(url, title);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (e) {
+      status.innerHTML = 'Falha: ' + esc(e.message) +
+        '<br>Use <strong>Abrir no archive.ph</strong> ou cole a URL manualmente lá.';
+    } finally {
+      goBtn.disabled = false;
+    }
+  }
+
+  goBtn.onclick = load;
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') load(); });
+
+  $('btnArchive').onclick = () => {
+    const url = input.value.trim();
+    const target = url ? 'https://archive.ph/newest/' + encodeURIComponent(url) : 'https://archive.ph/';
+    window.open(target, '_blank', 'noopener');
+  };
+
+  renderHistory();
+
+  // Pré-preenche com a URL do parâmetro ?u= (útil como atalho)
+  const q = new URLSearchParams(location.search).get('u');
+  if (q) { input.value = q; load(); }
+})();
+</script>
+</body>
+</html>
