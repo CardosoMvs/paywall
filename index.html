@@ -7,20 +7,17 @@
 
 <!-- PWA -->
 <link rel="manifest" href="manifest.webmanifest">
-<meta name="theme-color" content="#111111">
+<meta name="theme-color" content="#ffffff">
 <link rel="icon" href="icon-192.png" sizes="192x192" type="image/png">
 
 <!-- iOS -->
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Leitor">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 
 <style>
-  :root { --bg:#fff; --fg:#111; --muted:#666; --line:#e5e5e5; --accent:#111; }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg:#111; --fg:#eee; --muted:#aaa; --line:#333; --accent:#eee; }
-  }
+  :root { color-scheme: light; --bg:#fff; --fg:#000; --muted:#666; --line:#e5e5e5; --accent:#000; }
   * { box-sizing: border-box; }
   body {
     margin: 0; padding: 16px; padding-top: max(16px, env(safe-area-inset-top));
