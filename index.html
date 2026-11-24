@@ -47,6 +47,7 @@
   #output img { max-width: 100%; height: auto; border-radius: 6px; }
   #output ul.images { list-style: none; padding-left: 0; }
   #output ul.images li { margin: 14px 0; }
+  #output p.caption { font-size: 14px; color: var(--muted); margin-top: -4px; line-height: 1.4; }
   #output a { color: inherit; }
   #output h1, #output h2, #output h3 { line-height: 1.25; margin-top: 1.4em; }
   #output pre, #output code { background: rgba(127,127,127,.12); padding: 2px 4px; border-radius: 4px; font-size: 14px; overflow-x: auto; }
@@ -142,7 +143,7 @@
 
   function mdToHtml(md) {
     const lines = stripJinaMeta(String(md).replace(/\r\n?/g, '\n'));
-    let html = '', inCode = false, inList = false;
+    let html = '', inCode = false, inList = false, lastWasImage = false;
     const para = [];
     const inline = (t) => {
       t = esc(t);
@@ -161,26 +162,35 @@
       return t;
     };
     const flushPara = () => {
-      if (para.length) { html += '<p>' + inline(para.join(' ')) + '</p>'; para.length = 0; }
+      if (!para.length) return;
+      const content = inline(para.join(' '));
+      para.length = 0;
+      if (/^(?:<img\b[^>]*>\s*)+$/.test(content)) {
+        html += '<p>' + content + '</p>';
+        lastWasImage = true;
+      } else {
+        html += '<p' + (lastWasImage ? ' class="caption"' : '') + '>' + content + '</p>';
+        lastWasImage = false;
+      }
     };
     const closeList = () => { if (inList) { html += '</ul>'; inList = false; } };
     for (const line of lines) {
-      if (/^```/.test(line)) { flushPara(); closeList(); inCode = !inCode; html += inCode ? '<pre>' : '</pre>'; continue; }
+      if (/^```/.test(line)) { flushPara(); closeList(); lastWasImage = false; inCode = !inCode; html += inCode ? '<pre>' : '</pre>'; continue; }
       if (inCode) { html += esc(line) + '\n'; continue; }
       if (/^#{1,6}\s/.test(line)) {
-        flushPara(); closeList();
+        flushPara(); closeList(); lastWasImage = false;
         const m = line.match(/^(#{1,6})\s+(.*)$/);
         html += `<h${m[1].length}>${inline(m[2])}</h${m[1].length}>`;
         continue;
       }
       if (/^\s*[-*+]\s/.test(line)) {
-        flushPara();
+        flushPara(); lastWasImage = false;
         if (!inList) { html += '<ul>'; inList = true; }
         html += '<li>' + inline(line.replace(/^\s*[-*+]\s+/, '')) + '</li>';
         continue;
       }
-      if (/^\s*>\s/.test(line)) { flushPara(); closeList(); html += '<blockquote>' + inline(line.replace(/^\s*>\s?/, '')) + '</blockquote>'; continue; }
-      if (/^---+$/.test(line.trim())) { flushPara(); closeList(); html += '<hr>'; continue; }
+      if (/^\s*>\s/.test(line)) { flushPara(); closeList(); lastWasImage = false; html += '<blockquote>' + inline(line.replace(/^\s*>\s?/, '')) + '</blockquote>'; continue; }
+      if (/^---+$/.test(line.trim())) { flushPara(); closeList(); lastWasImage = false; html += '<hr>'; continue; }
       if (line.trim() === '') { flushPara(); continue; }
       flushPara(); closeList();
       para.push(line.trim());
@@ -200,16 +210,16 @@
     return h ? h[1].trim() : null;
   }
 
-  // Sites em que o Jina precisa de um seletor para não trazer menu/rodapé
+  // Sites em que o Jina precisa de um seletor para não trazer menu/rodapé.
+  // "inline" é um seletor mais amplo, usado só para achar a posição das figuras.
   const SITE_SELECTORS = [
-    { host: /(^|\.)folha\.uol\.com\.br$/i, selector: '.c-news__body' }
+    { host: /(^|\.)folha\.uol\.com\.br$/i, selector: '.c-news__body', inline: 'article' }
   ];
 
-  function targetSelectorFor(url) {
+  function siteRuleFor(url) {
     try {
       const host = new URL(url).hostname;
-      const rule = SITE_SELECTORS.find(r => r.host.test(host));
-      return rule ? rule.selector : null;
+      return SITE_SELECTORS.find(r => r.host.test(host)) || null;
     } catch { return null; }
   }
 
@@ -220,18 +230,71 @@
       if (!res.ok) throw new Error('HTTP ' + res.status);
       return res.text();
     };
-    const selector = targetSelectorFor(url);
-    if (!selector) return get({ 'Accept': 'text/plain' });
-    const targeted = await get({
-      'Accept': 'text/plain',
-      'X-Target-Selector': selector,
-      'X-With-Images-Summary': 'true'
-    });
+    const rule = siteRuleFor(url);
+    if (!rule) return get({ 'Accept': 'text/plain' });
+    const [body, full] = await Promise.all([
+      get({ 'Accept': 'text/plain', 'X-Target-Selector': rule.selector }),
+      get({ 'Accept': 'text/plain', 'X-Target-Selector': rule.inline }).catch(() => '')
+    ]);
     // Se o seletor não achar conteúdo, volta para a leitura completa
-    if (targeted.split('Markdown Content:').pop().trim().length < 400) {
+    if (body.split('Markdown Content:').pop().trim().length < 400) {
       return get({ 'Accept': 'text/plain' });
     }
-    return targeted;
+    const inlined = inlineArticle(body, full);
+    if (inlined) return inlined;
+    // Sem como posicionar as figuras: usa a lista de imagens no rodapé
+    return get({
+      'Accept': 'text/plain',
+      'X-Target-Selector': rule.selector,
+      'X-With-Images-Summary': 'true'
+    });
+  }
+
+  // Monta o texto do corpo preservando figuras e legendas na posição original:
+  // percorre o container, alinha os parágrafos do corpo e insere só as figuras.
+  function inlineArticle(bodyMd, fullMd) {
+    const blocks = (md) => String(md).split('Markdown Content:').pop()
+      .split(/\n{2,}/).map(b => b.trim()).filter(Boolean);
+    const plain = (s) => s
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+      .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+      .replace(/[*_`#>]/g, '')
+      .replace(/\s+/g, ' ').trim();
+    const body = blocks(bodyMd);
+    const art = blocks(fullMd);
+    if (!body.length || !art.length) return null;
+    const isFigure = (b) => b.indexOf('![') >= 0 && plain(b) === '';
+    const same = (a, b) => !!a && !!b && (a === b || (a.length > 30 && b.length > 30 && a.slice(0, 80) === b.slice(0, 80)));
+    const figs = [];
+    let seen = 0;
+    for (let i = 0; i < art.length; i++) {
+      const b = art[i];
+      if (isFigure(b)) {
+        // figuras antes do início do corpo (foto do colunista etc.) são ignoradas
+        if (seen === 0) continue;
+        let caption = '';
+        const next = art[i + 1];
+        if (next && !isFigure(next) && !same(plain(next), plain(body[seen])) && plain(next).length >= 25) {
+          caption = next;
+          i++;
+        }
+        figs.push({ after: seen, image: b, caption });
+        continue;
+      }
+      if (same(plain(b), plain(body[seen]))) {
+        seen++;
+        if (seen === body.length) break; // fim do corpo do artigo
+      }
+    }
+    if (seen < body.length) return null;
+    const out = [];
+    for (let p = 0; p <= body.length; p++) {
+      if (p > 0) out.push(body[p - 1]);
+      for (const f of figs) {
+        if (f.after === p) { out.push(f.image); if (f.caption) out.push(f.caption); }
+      }
+    }
+    return out.join('\n\n');
   }
 
   // --- Carregar artigo ---
