@@ -85,6 +85,22 @@
     background: var(--bg); background: color-mix(in srgb, var(--bg) 95%, transparent); border-top: 1px solid var(--line);
     font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; pointer-events: none; }
   .read-footer.hidden { display: none; }
+  .top-progress { position: fixed; top: 0; left: 0; height: 3px; width: 0; background: var(--accent); z-index: 30; transition: width .12s linear; }
+  .top-progress.hidden { display: none; }
+  .lightbox { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,.85); display: flex; align-items: center; justify-content: center; padding: 20px; cursor: zoom-out; }
+  .lightbox.hidden { display: none; }
+  .lightbox img { max-width: 100%; max-height: 100%; border-radius: 4px; }
+  .lightbox button { position: absolute; top: 8px; right: 12px; background: transparent; color: #fff; font-size: 30px; line-height: 1; padding: 4px 10px; }
+  #output img { cursor: zoom-in; }
+  .article-head .share-btn { background: none; border: 0; padding: 0; color: var(--muted); font-size: 13px; cursor: pointer; margin-left: 10px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .article-head .share-btn:hover { text-decoration: underline; }
+  #status .retry { background: transparent; color: var(--muted); border: 1px solid var(--line); font-size: 12px; padding: 4px 8px; margin-top: 6px; }
+  #status a { color: var(--muted); font-size: 12px; }
+  .filters-line { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
+  .filters-line .periods { margin: 0; }
+  .unread-toggle { background: transparent; border: 1px solid var(--line); color: var(--muted); border-radius: 999px; padding: 4px 10px; font-size: 12px; }
+  .unread-toggle.active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+  .load-more { display: block; width: 100%; margin: 14px 0 4px; background: transparent; color: var(--muted); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font-size: 13px; }
 
   .tabs { display: flex; gap: 18px; margin: -4px 0 16px; border-bottom: 1px solid var(--line); }
   .tabs button { background: transparent; color: var(--muted); border: none; border-bottom: 2px solid transparent; border-radius: 0; padding: 6px 0 10px; font-size: 15px; }
@@ -126,6 +142,8 @@
 </style>
 </head>
 <body>
+
+<div id="topProgress" class="top-progress hidden"></div>
 
 <div class="topbar">
   <h1 class="brand"><img src="icon-192.png" alt="" width="28" height="28">Leitura Diária</h1>
@@ -181,7 +199,10 @@
     <div class="row-label" id="subsLabel">Tópicos</div>
     <div class="sections subs" id="newsSubs"></div>
   </div>
-  <div class="periods" id="newsPeriods"></div>
+  <div class="filters-line">
+    <div class="periods" id="newsPeriods"></div>
+    <button id="unreadOnly" class="unread-toggle" type="button" aria-pressed="false">Só não lidas</button>
+  </div>
   <div id="newsStatus" class="hint"></div>
   <div id="newsList"></div>
 </div>
@@ -192,6 +213,11 @@
   <span id="readPct">0%</span>
   <span>·</span>
   <span id="readPage">página 1 de 1</span>
+</div>
+
+<div id="lightbox" class="lightbox hidden" role="dialog" aria-modal="true" aria-label="Imagem ampliada">
+  <img id="lightboxImg" alt="">
+  <button id="lightboxClose" type="button" aria-label="Fechar imagem">×</button>
 </div>
 
 <script>
@@ -349,7 +375,10 @@
   const SITE_SELECTORS = [
     { host: /(^|\.)folha\.uol\.com\.br$/i,
       selectors: ['[data-news-content-text]', '[itemprop="articleBody"]'],
-      inline: 'article' }
+      inline: 'article' },
+    { host: /(^|\.)uol\.com\.br$/i,
+      selectors: ['article'],
+      inline: '' }
   ];
 
   function siteRuleFor(url) {
@@ -371,19 +400,24 @@
     const tryGet = async (headers) => {
       try { return await get(headers); } catch { return ''; }
     };
-    const [a, b, full] = await Promise.all([
-      tryGet({ 'Accept': 'text/plain', 'X-Target-Selector': rule.selectors[0] }),
-      tryGet({ 'Accept': 'text/plain', 'X-Target-Selector': rule.selectors[1] }),
-      tryGet({ 'Accept': 'text/plain', 'X-Target-Selector': rule.inline })
-    ]);
+    const sels = rule.selectors || [];
+    const jobs = sels.map(sel => tryGet({ 'Accept': 'text/plain', 'X-Target-Selector': sel }));
+    jobs.push(rule.inline
+      ? tryGet({ 'Accept': 'text/plain', 'X-Target-Selector': rule.inline })
+      : Promise.resolve(''));
+    const results = await Promise.all(jobs);
+    const full = results.pop();
     const contentLen = (s) => String(s || '').split('Markdown Content:').pop().trim().length;
-    const useA = contentLen(a) >= contentLen(b);
-    const body = useA ? a : b;
-    const usedSel = useA ? rule.selectors[0] : rule.selectors[1];
+    let body = '', usedSel = sels[0] || '', best = -1;
+    results.forEach((cand, i) => {
+      const l = contentLen(cand);
+      if (l > best) { best = l; body = cand; usedSel = sels[i]; }
+    });
     // Se nenhum seletor achar conteúdo, volta para a leitura completa
-    if (contentLen(body) < 400) {
+    if (best < 400) {
       return { text: await get({ 'Accept': 'text/plain' }), subtitle: '' };
     }
+    if (!rule.inline) return { text: body, subtitle: '' };
     const inlined = inlineArticle(body, full);
     if (inlined) return inlined;
     // Sem como posicionar as figuras: usa a lista de imagens no rodapé
@@ -460,6 +494,62 @@
     return { text: meta + 'Markdown Content:\n\n' + out.join('\n\n'), subtitle };
   }
 
+  // --- Compartilhar, zoom de imagem e cache de artigos ---
+  const ART_KEY = 'leitor_limpo_articles_v1';
+
+  function readArtCache(url) {
+    try {
+      const m = JSON.parse(localStorage.getItem(ART_KEY) || '{}');
+      const e = m[url];
+      if (e && e.text && Date.now() - e.ts < 30 * 60 * 1000) return e;
+    } catch {}
+    return null;
+  }
+  function writeArtCache(url, entry) {
+    try {
+      const m = JSON.parse(localStorage.getItem(ART_KEY) || '{}');
+      m[url] = Object.assign({}, entry, { ts: Date.now() });
+      const keys = Object.keys(m).sort((a, b) => m[b].ts - m[a].ts).slice(0, 15);
+      const out = {};
+      keys.forEach(k => { out[k] = m[k]; });
+      localStorage.setItem(ART_KEY, JSON.stringify(out));
+    } catch {}
+  }
+  async function shareArticle(url, title) {
+    if (navigator.share) {
+      try { await navigator.share({ title: title, text: title, url: url }); return; } catch {}
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      return true;
+    } catch {
+      window.prompt('Copie o link:', url);
+      return false;
+    }
+  }
+
+  function openLightbox(src, alt) {
+    const img = $('lightboxImg');
+    img.src = src;
+    img.alt = alt || '';
+    $('lightbox').classList.remove('hidden');
+  }
+  function closeLightbox() {
+    const lb = $('lightbox');
+    if (!lb) return;
+    lb.classList.add('hidden');
+    $('lightboxImg').src = '';
+  }
+  $('lightbox').onclick = (e) => {
+    if (e.target.id === 'lightbox' || e.target.id === 'lightboxClose') closeLightbox();
+  };
+  output.addEventListener('click', (e) => {
+    const img = e.target && e.target.closest ? e.target.closest('img') : null;
+    if (!img) return;
+    e.preventDefault();
+    openLightbox(img.src, img.alt);
+  });
+
   // --- Carregar artigo ---
   function renderArticleHead(title, url, subtitle) {
     if (/^\s*<h1/i.test(output.innerHTML)) return;
@@ -487,6 +577,18 @@
       head.appendChild(sub);
     }
     head.appendChild(src);
+    const share = document.createElement('button');
+    share.type = 'button';
+    share.className = 'share-btn';
+    share.textContent = 'Compartilhar';
+    share.onclick = async () => {
+      const ok = await shareArticle(url, title);
+      if (ok === true) {
+        share.textContent = 'Link copiado';
+        setTimeout(() => { share.textContent = 'Compartilhar'; }, 1600);
+      }
+    };
+    head.appendChild(share);
     output.prepend(head);
   }
 
@@ -515,7 +617,7 @@
 
   let loadToken = 0;
 
-  async function load() {
+  async function load(force) {
     const token = ++loadToken;
     const url = input.value.trim();
     if (!url) { status.textContent = 'Cole uma URL primeiro.'; return; }
@@ -527,38 +629,56 @@
     }
     output.innerHTML = '';
     updateReadingProgress();
-    status.textContent = 'Extraindo… (pode levar alguns segundos)';
     goBtn.disabled = true;
     try {
-      const article = await fetchArticle(url);
-      const text = article.text;
+      let article = force ? null : readArtCache(url);
+      const fromCache = !!article;
+      if (article) {
+        status.textContent = 'Abrindo do cache…';
+      } else {
+        status.textContent = 'Extraindo… (pode levar alguns segundos)';
+        article = await fetchArticle(url);
+      }
       if (token !== loadToken) return;
+      const text = article.text;
       if (!text || text.length < 200) throw new Error('Conteúdo muito curto ou vazio');
-      const title = extractTitle(text) || url;
+      const title = article.title || extractTitle(text) || url;
       output.innerHTML = mdToHtml(text);
       renderArticleHead(title, url, article.subtitle);
       const words = (text.match(/\S+/g) || []).length;
-      status.textContent = 'Pronto. ' + text.length + ' caracteres · ~' +
-        Math.max(1, Math.round(words / 220)) + ' min de leitura' +
+      status.textContent = (fromCache ? 'Pronto (cache). ' : 'Pronto. ') +
+        text.length + ' caracteres · ~' + Math.max(1, Math.round(words / 220)) + ' min de leitura' +
         (text.length < 1200 ? ' · conteúdo curto (pode ser paywall)' : '');
+      if (!fromCache) writeArtCache(url, { text: text, subtitle: article.subtitle, title: title });
       requestAnimationFrame(updateReadingProgress);
       document.title = title + ' — Leitura Diária';
       saveHistory(url, title);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (e) {
       if (token !== loadToken) return;
-      status.innerHTML = 'Falha: ' + esc(e.message) +
-        '<br>Tente novamente ou abra a URL diretamente no navegador.';
+      status.innerHTML = 'Falha: ' + esc(e.message) + '<br>';
+      const retry = document.createElement('button');
+      retry.type = 'button';
+      retry.className = 'retry';
+      retry.textContent = 'Tentar novamente';
+      retry.onclick = () => load(true);
+      const open = document.createElement('a');
+      open.href = url;
+      open.target = '_blank';
+      open.rel = 'noopener';
+      open.textContent = 'Abrir original';
+      status.append(retry, ' ', open);
     } finally {
       goBtn.disabled = false;
     }
   }
 
-  goBtn.onclick = load;
-  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') load(); });
+  goBtn.onclick = () => load(true);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') load(true); });
 
   // --- Notícias (manchetes das seções da Folha) ---
   const SECTIONS = [
+    { id: 'todas', label: 'Todas', url: '', all: true },
     { id: 'ultimas', label: 'Últimas', url: 'https://www1.folha.uol.com.br/ultimas-noticias/' },
     { id: 'opiniao', label: 'Opinião', url: 'https://www1.folha.uol.com.br/opiniao/' },
     { id: 'poder', label: 'Poder', url: 'https://www1.folha.uol.com.br/poder/' },
@@ -598,6 +718,26 @@
   let currentTopics = [];
   let newsStarted = false;
   let newsScroll = 0;
+  const LAST_KEY = 'leitor_limpo_last_section_v1';
+  const UNREAD_KEY = 'leitor_limpo_unread_v1';
+  const unreadBtn = $('unreadOnly');
+  const BATCH = 30;
+  let shownLimit = BATCH;
+  let unreadOnly = false;
+  try { unreadOnly = localStorage.getItem(UNREAD_KEY) === '1'; } catch {}
+
+  function applyUnreadToggle() {
+    unreadBtn.classList.toggle('active', unreadOnly);
+    unreadBtn.setAttribute('aria-pressed', unreadOnly ? 'true' : 'false');
+  }
+  applyUnreadToggle();
+  unreadBtn.onclick = () => {
+    unreadOnly = !unreadOnly;
+    try { localStorage.setItem(UNREAD_KEY, unreadOnly ? '1' : '0'); } catch {}
+    applyUnreadToggle();
+    shownLimit = BATCH;
+    if (currentItems.length) renderNews(currentItems);
+  };
 
   function getRead() {
     try { return new Set(JSON.parse(localStorage.getItem(READ_KEY) || '[]')); } catch { return new Set(); }
@@ -615,7 +755,15 @@
     newsView.classList.toggle('hidden', name !== 'news');
     tabReader.classList.toggle('active', name === 'reader');
     tabNews.classList.toggle('active', name === 'news');
-    if (name === 'news' && !newsStarted) { newsStarted = true; selectSection(currentSection); }
+    if (name === 'news' && !newsStarted) {
+      newsStarted = true;
+      let target = currentSection;
+      try {
+        target = new URLSearchParams(location.search).get('s') || localStorage.getItem(LAST_KEY) || currentSection;
+      } catch {}
+      if (SECTIONS.some(s => s.id === target)) currentSection = target;
+      selectSection(currentSection);
+    }
     if (name === 'news' && !fromNews) requestAnimationFrame(() => window.scrollTo(0, newsScroll));
     updateReadingProgress();
   }
@@ -639,6 +787,7 @@
     b.onclick = () => {
       periodMs = p.ms;
       try { localStorage.setItem(PERIOD_KEY, periodMs); } catch {}
+      shownLimit = BATCH;
       highlightPeriod();
       if (currentItems.length) renderNews(currentItems);
     };
@@ -661,8 +810,10 @@
 
   function selectSection(id) {
     currentSection = id;
+    try { localStorage.setItem(LAST_KEY, id); } catch {}
     const sec = SECTIONS.find(s => s.id === id);
-    currentFeed = { url: sec.url, label: sec.label };
+    currentFeed = sec.all ? { url: 'todas', label: 'Todas' } : { url: sec.url, label: sec.label };
+    shownLimit = BATCH;
     for (const b of newsSections.children) b.classList.toggle('active', b.dataset.id === id);
     newsSubs.innerHTML = '';
     subsRow.classList.add('hidden');
@@ -671,10 +822,22 @@
 
   function selectTopic(label, url) {
     currentFeed = { url, label };
+    shownLimit = BATCH;
     openFeed();
   }
 
   $('newsRefresh').onclick = () => {
+    if (currentFeed.url === 'todas') {
+      try {
+        localStorage.removeItem(NEWS_KEY + 'todas');
+        SECTIONS.filter(s => !s.all).forEach(s => localStorage.removeItem(NEWS_KEY + encodeURIComponent(s.url)));
+      } catch {}
+      newsSubs.innerHTML = '';
+      subsRow.classList.add('hidden');
+      newsStatus.textContent = 'Atualizando…';
+      openAll();
+      return;
+    }
     try { localStorage.removeItem(NEWS_KEY + encodeURIComponent(currentFeed.url)); } catch {}
     newsSubs.innerHTML = '';
     subsRow.classList.add('hidden');
@@ -683,6 +846,7 @@
   };
 
   function openFeed() {
+    if (currentFeed.url === 'todas') { openAll(); return; }
     const sec = SECTIONS.find(s => s.id === currentSection);
     for (const b of newsSubs.children) b.classList.toggle('active', b.dataset.url === currentFeed.url);
     newsList.innerHTML = '';
@@ -695,6 +859,48 @@
     }
     newsStatus.textContent = 'Carregando manchetes…';
     loadNews(currentFeed, sec.url);
+  }
+
+  function openAll() {
+    newsList.innerHTML = '';
+    newsSubs.innerHTML = '';
+    subsRow.classList.add('hidden');
+    const cached = readNewsCache('todas');
+    if (cached) { renderNews(cached.items); return; }
+    newsStatus.textContent = 'Juntando seções…';
+    loadAll();
+  }
+
+  async function loadAll() {
+    const secs = SECTIONS.filter(s => !s.all);
+    const results = await Promise.all(secs.map(async s => {
+      const cached = readNewsCache(s.url);
+      if (cached) return cached.items;
+      try {
+        const res = await fetch('https://r.jina.ai/' + s.url, { headers: { 'Accept': 'text/plain' } });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const md = await res.text();
+        const items = parseNews(md);
+        try {
+          localStorage.setItem(NEWS_KEY + encodeURIComponent(s.url), JSON.stringify({ ts: Date.now(), items: items, topics: parseTopics(md, s.url) }));
+        } catch {}
+        return items;
+      } catch { return []; }
+    }));
+    const seen = new Set();
+    const merged = [];
+    for (const items of results) {
+      for (const it of items) {
+        if (seen.has(it.url)) continue;
+        seen.add(it.url);
+        merged.push(it);
+      }
+    }
+    merged.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+    if (currentFeed.url !== 'todas') return;
+    if (!merged.length) { newsStatus.textContent = 'Falha ao juntar as seções.'; return; }
+    try { localStorage.setItem(NEWS_KEY + 'todas', JSON.stringify({ ts: Date.now(), items: merged })); } catch {}
+    renderNews(merged);
   }
 
   function readNewsCache(url) {
@@ -910,22 +1116,25 @@
 
   function renderNews(items) {
     currentItems = items;
-    const shown = filterByPeriod(items);
+    const read = getRead();
+    let pool = filterByPeriod(items);
+    if (unreadOnly) pool = pool.filter(it => !read.has(it.url));
+    const page = pool.slice(0, shownLimit);
     newsList.innerHTML = '';
-    if (!shown.length) {
+    if (!pool.length) {
       newsStatus.textContent = items.length
-        ? 'Nenhuma notícia em ' + periodLabel() + ' · amplie o período'
+        ? (unreadOnly ? 'Nenhuma notícia não lida em ' : 'Nenhuma notícia em ') + periodLabel() + ' · amplie o período'
         : 'Nenhuma notícia encontrada.';
       return;
     }
-    newsStatus.textContent = shown.length + (shown.length === 1 ? ' notícia · ' : ' notícias · ') + periodLabel() + ' · toque para ler';
-    const read = getRead();
-    for (const it of shown) {
+    newsStatus.textContent = page.length + ' de ' + pool.length + ' notícias · ' + periodLabel() +
+      (unreadOnly ? ' · não lidas' : '') + ' · toque para ler';
+    for (const it of page) {
       const a = document.createElement('a');
       a.className = 'news-item';
       a.href = it.url;
       if (read.has(it.url)) a.classList.add('read');
-      a.onclick = (e) => { e.preventDefault(); markRead(it.url); a.classList.add('read'); addReadFlag(a); input.value = it.url; showView('reader'); load(); };
+      a.onclick = (e) => { e.preventDefault(); markRead(it.url); a.classList.add('read'); addReadFlag(a); input.value = it.url; showView('reader'); load(); if (unreadOnly) renderNews(currentItems); };
       const info = document.createElement('div');
       info.className = 'news-info';
       const title = document.createElement('span');
@@ -953,6 +1162,14 @@
       }
       newsList.appendChild(a);
     }
+    if (pool.length > page.length) {
+      const more = document.createElement('button');
+      more.type = 'button';
+      more.className = 'load-more';
+      more.textContent = 'Mostrar mais (' + Math.min(BATCH, pool.length - page.length) + ')';
+      more.onclick = () => { shownLimit += BATCH; renderNews(currentItems); };
+      newsList.appendChild(more);
+    }
   }
 
   // --- Preferências de leitura ---
@@ -960,11 +1177,13 @@
   const toTop = $('toTop');
   const readFooter = $('readFooter');
   const readPct = $('readPct'), readPage = $('readPage');
+  const topProgress = $('topProgress');
 
   function updateReadingProgress() {
     const show = newsView.classList.contains('hidden') && output.innerHTML.trim() !== '';
     readFooter.classList.toggle('hidden', !show);
-    if (!show) return;
+    topProgress.classList.toggle('hidden', !show);
+    if (!show) { topProgress.style.width = '0'; return; }
     const vh = window.innerHeight;
     const docHeight = document.documentElement.scrollHeight;
     const max = Math.max(1, docHeight - vh);
@@ -973,6 +1192,7 @@
     const page = Math.min(totalPages, Math.max(1, Math.round(pct * totalPages / 100)));
     readPct.textContent = pct + '%';
     readPage.textContent = 'página ' + page + ' de ' + totalPages;
+    topProgress.style.width = pct + '%';
   }
 
   let fontSize = 18;
@@ -1083,6 +1303,22 @@
     if (e.key === '/' && document.activeElement !== input) {
       e.preventDefault();
       input.focus();
+      return;
+    }
+    if (e.key === 'Escape') {
+      closeLightbox();
+      confirmClear.classList.add('hidden');
+      return;
+    }
+    if (!newsView.classList.contains('hidden') && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
+      const tag = (document.activeElement && document.activeElement.tagName) || '';
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      const ids = SECTIONS.map(s => s.id);
+      let i = ids.indexOf(currentSection);
+      if (i < 0) i = 0;
+      i = (i + (e.key === 'ArrowRight' ? 1 : -1) + ids.length) % ids.length;
+      e.preventDefault();
+      selectSection(ids[i]);
     }
   });
 
