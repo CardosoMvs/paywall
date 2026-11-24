@@ -164,7 +164,8 @@
 
 <nav class="tabs">
   <button id="tabReader" type="button" class="active">Leitor</button>
-  <button id="tabNews" type="button">Notícias</button>
+  <button id="tabFolha" type="button">Folha</button>
+  <button id="tabUol" type="button">UOL</button>
 </nav>
 
 <div id="readerView">
@@ -221,6 +222,20 @@
   </div>
   <div id="newsStatus" class="hint"></div>
   <div id="newsList"></div>
+</div>
+
+<div id="uolView" class="hidden">
+  <div class="news-top">
+    <div class="news-source"><img class="source-logo" src="uol-mark.png" alt="UOL" title="UOL"><span class="row-label">Seções</span></div>
+    <button id="uolRefresh" class="refresh" type="button" title="Atualizar notícias do UOL">↻ Atualizar</button>
+  </div>
+  <div class="sections" id="uolSections"></div>
+  <div class="filters-line">
+    <div class="periods" id="uolPeriods"></div>
+    <button id="uolUnreadOnly" class="unread-toggle" type="button" aria-pressed="false">Só não lidas</button>
+  </div>
+  <div id="uolStatus" class="hint"></div>
+  <div id="uolList"></div>
 </div>
 
 <button id="toTop" class="to-top hidden" type="button" aria-label="Voltar ao topo">↑</button>
@@ -597,11 +612,12 @@
     if (/^\s*<h1/i.test(output.innerHTML)) return;
     const head = document.createElement('header');
     head.className = 'article-head';
+    const backTab = sourceInfo(url).kind === 'uol' ? 'uol' : 'folha';
     const back = document.createElement('button');
     back.type = 'button';
     back.className = 'back-news';
-    back.textContent = '← Notícias';
-    back.onclick = () => showView('news');
+    back.textContent = '← ' + (backTab === 'uol' ? 'UOL' : 'Folha');
+    back.onclick = () => showView(backTab);
     const h = document.createElement('h1');
     h.textContent = title;
     let host = '';
@@ -732,8 +748,8 @@
     { id: 'f5', label: 'F5', url: 'https://f5.folha.uol.com.br/' }
   ];
   const MONTHS = { jan: '01', fev: '02', mar: '03', abr: '04', mai: '05', jun: '06', jul: '07', ago: '08', set: '09', out: '10', nov: '11', dez: '12' };
-  const readerView = $('readerView'), newsView = $('newsView');
-  const tabReader = $('tabReader'), tabNews = $('tabNews');
+  const readerView = $('readerView'), newsView = $('newsView'), uolView = $('uolView');
+  const tabReader = $('tabReader'), tabFolha = $('tabFolha'), tabUol = $('tabUol');
   const newsSections = $('newsSections'), newsSubs = $('newsSubs');
   const subsRow = $('subsRow'), subsSection = $('subsSection');
   const newsStatus = $('newsStatus'), newsList = $('newsList');
@@ -768,19 +784,33 @@
   let shownLimit = BATCH;
   let unreadOnly = false;
   try { unreadOnly = localStorage.getItem(UNREAD_KEY) === '1'; } catch {}
+  let uolStarted = false;
+  let uolScroll = 0;
+  let uolSectionId = 'noticias';
+  let uolItems = [];
+  let uolShownLimit = BATCH;
 
   function applyUnreadToggle() {
     unreadBtn.classList.toggle('active', unreadOnly);
     unreadBtn.setAttribute('aria-pressed', unreadOnly ? 'true' : 'false');
+    const ub = $('uolUnreadOnly');
+    if (ub) {
+      ub.classList.toggle('active', unreadOnly);
+      ub.setAttribute('aria-pressed', unreadOnly ? 'true' : 'false');
+    }
   }
-  applyUnreadToggle();
-  unreadBtn.onclick = () => {
+  function toggleUnread() {
     unreadOnly = !unreadOnly;
     try { localStorage.setItem(UNREAD_KEY, unreadOnly ? '1' : '0'); } catch {}
     applyUnreadToggle();
     shownLimit = BATCH;
-    if (currentItems.length) renderNews(currentItems);
-  };
+    uolShownLimit = BATCH;
+    if (!newsView.classList.contains('hidden') && currentItems.length) renderNews(currentItems);
+    if (!uolView.classList.contains('hidden') && uolItems.length) renderUol(uolItems);
+  }
+  applyUnreadToggle();
+  unreadBtn.onclick = toggleUnread;
+  $('uolUnreadOnly').onclick = toggleUnread;
 
   function getRead() {
     try { return new Set(JSON.parse(localStorage.getItem(READ_KEY) || '[]')); } catch { return new Set(); }
@@ -792,26 +822,45 @@
   }
 
   function showView(name) {
-    const fromNews = !newsView.classList.contains('hidden');
-    if (name === 'reader' && fromNews) newsScroll = window.scrollY;
-    readerView.classList.toggle('hidden', name !== 'reader');
-    newsView.classList.toggle('hidden', name !== 'news');
-    tabReader.classList.toggle('active', name === 'reader');
-    tabNews.classList.toggle('active', name === 'news');
-    if (name === 'news' && !newsStarted) {
-      newsStarted = true;
-      let target = currentSection;
-      try {
-        target = new URLSearchParams(location.search).get('s') || localStorage.getItem(LAST_KEY) || currentSection;
-      } catch {}
-      if (SECTIONS.some(s => s.id === target)) currentSection = target;
-      selectSection(currentSection);
+    const fromFolha = !newsView.classList.contains('hidden');
+    const fromUol = !uolView.classList.contains('hidden');
+    if (name === 'reader') {
+      if (fromFolha) newsScroll = window.scrollY;
+      if (fromUol) uolScroll = window.scrollY;
     }
-    if (name === 'news' && !fromNews) requestAnimationFrame(() => window.scrollTo(0, newsScroll));
+    readerView.classList.toggle('hidden', name !== 'reader');
+    newsView.classList.toggle('hidden', name !== 'folha');
+    uolView.classList.toggle('hidden', name !== 'uol');
+    tabReader.classList.toggle('active', name === 'reader');
+    tabFolha.classList.toggle('active', name === 'folha');
+    tabUol.classList.toggle('active', name === 'uol');
+    if (name === 'folha' && !newsStarted) initFolha();
+    if (name === 'uol' && !uolStarted) initUol();
+    if (name === 'folha' && !fromFolha) requestAnimationFrame(() => window.scrollTo(0, newsScroll));
+    if (name === 'uol' && !fromUol) requestAnimationFrame(() => window.scrollTo(0, uolScroll));
     updateReadingProgress();
   }
+  function initFolha() {
+    newsStarted = true;
+    let target = currentSection;
+    try {
+      target = new URLSearchParams(location.search).get('s') || localStorage.getItem(LAST_KEY) || currentSection;
+    } catch {}
+    if (SECTIONS.some(s => s.id === target)) currentSection = target;
+    selectSection(currentSection);
+  }
+  function initUol() {
+    uolStarted = true;
+    let target = uolSectionId;
+    try {
+      target = new URLSearchParams(location.search).get('s') || localStorage.getItem('leitor_limpo_last_uol_v1') || uolSectionId;
+    } catch {}
+    if (UOL_FEEDS.some(s => s.id === target)) uolSectionId = target;
+    selectUolSection(uolSectionId);
+  }
   tabReader.onclick = () => showView('reader');
-  tabNews.onclick = () => showView('news');
+  tabFolha.onclick = () => showView('folha');
+  tabUol.onclick = () => showView('uol');
 
   SECTIONS.forEach(s => {
     const b = document.createElement('button');
@@ -827,19 +876,24 @@
     b.type = 'button';
     b.textContent = p.label;
     b.dataset.ms = p.ms;
-    b.onclick = () => {
-      periodMs = p.ms;
-      try { localStorage.setItem(PERIOD_KEY, periodMs); } catch {}
-      shownLimit = BATCH;
-      highlightPeriod();
-      if (currentItems.length) renderNews(currentItems);
-    };
+    b.onclick = () => setPeriod(p.ms);
     periodsBox.appendChild(b);
   });
   function highlightPeriod() {
     for (const b of periodsBox.children) b.classList.toggle('active', +b.dataset.ms === periodMs);
   }
   highlightPeriod();
+
+  function setPeriod(ms) {
+    periodMs = ms;
+    try { localStorage.setItem(PERIOD_KEY, periodMs); } catch {}
+    shownLimit = BATCH;
+    uolShownLimit = BATCH;
+    highlightPeriod();
+    highlightUolPeriod();
+    if (!newsView.classList.contains('hidden') && currentItems.length) renderNews(currentItems);
+    if (!uolView.classList.contains('hidden') && uolItems.length) renderUol(uolItems);
+  }
 
   function filterByPeriod(items) {
     if (!periodMs) return items;
@@ -1229,6 +1283,227 @@
     }
   }
 
+  // --- UOL (feeds RSS) ---
+  const UOL_FEEDS = [
+    { id: 'todas', label: 'Todas', url: '', all: true },
+    { id: 'noticias', label: 'Notícias', url: 'https://rss.uol.com.br/feed/noticias.xml' },
+    { id: 'economia', label: 'Economia', url: 'https://rss.uol.com.br/feed/economia.xml' },
+    { id: 'esporte', label: 'Esporte', url: 'https://rss.uol.com.br/feed/esporte.xml' },
+    { id: 'entretenimento', label: 'Entretenimento', url: 'https://rss.uol.com.br/feed/entretenimento.xml' },
+    { id: 'tecnologia', label: 'Tecnologia', url: 'https://rss.uol.com.br/feed/tecnologia.xml' },
+    { id: 'educacao', label: 'Educação', url: 'https://rss.uol.com.br/feed/educacao.xml' },
+    { id: 'carros', label: 'Carros', url: 'https://rss.uol.com.br/feed/carros.xml' }
+  ];
+  const uolSections = $('uolSections'), uolPeriods = $('uolPeriods');
+  const uolStatus = $('uolStatus'), uolList = $('uolList');
+
+  UOL_FEEDS.forEach(s => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = s.label;
+    b.dataset.id = s.id;
+    b.onclick = () => selectUolSection(s.id);
+    uolSections.appendChild(b);
+  });
+  PERIODS.forEach(p => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = p.label;
+    b.dataset.ms = p.ms;
+    b.onclick = () => setPeriod(p.ms);
+    uolPeriods.appendChild(b);
+  });
+  function highlightUolPeriod() {
+    for (const b of uolPeriods.children) b.classList.toggle('active', +b.dataset.ms === periodMs);
+  }
+  highlightUolPeriod();
+
+  $('uolRefresh').onclick = () => {
+    if (uolSectionId === 'todas') {
+      try {
+        localStorage.removeItem(NEWS_KEY + 'uol_todas');
+        UOL_FEEDS.filter(f => !f.all).forEach(f => localStorage.removeItem(NEWS_KEY + encodeURIComponent(f.url)));
+      } catch {}
+      uolStatus.textContent = 'Atualizando…';
+      openUol();
+      return;
+    }
+    const feed = UOL_FEEDS.find(s => s.id === uolSectionId);
+    if (feed) { try { localStorage.removeItem(NEWS_KEY + encodeURIComponent(feed.url)); } catch {} }
+    uolStatus.textContent = 'Atualizando…';
+    openUol();
+  };
+
+  function selectUolSection(id) {
+    uolSectionId = id;
+    try { localStorage.setItem('leitor_limpo_last_uol_v1', id); } catch {}
+    for (const b of uolSections.children) b.classList.toggle('active', b.dataset.id === id);
+    uolShownLimit = BATCH;
+    openUol();
+  }
+
+  function openUol() {
+    const feed = UOL_FEEDS.find(s => s.id === uolSectionId);
+    uolList.innerHTML = '';
+    if (!feed) return;
+    if (feed.all) {
+      const cached = readNewsCache('uol_todas');
+      if (cached) { uolItems = cached.items; renderUol(cached.items); return; }
+      uolStatus.textContent = 'Juntando feeds do UOL…';
+      loadUolAll();
+      return;
+    }
+    const cached = readNewsCache(feed.url);
+    if (cached) { uolItems = cached.items; renderUol(cached.items); return; }
+    uolStatus.textContent = 'Carregando notícias do UOL…';
+    loadUolFeed(feed);
+  }
+
+  function isUolArticle(url) {
+    try {
+      const u = new URL(url);
+      if (!/(^|\.)uol\.com\.br$/i.test(u.hostname)) return false;
+      if (/(^|\.)folha\.uol\.com\.br$/i.test(u.hostname)) return false;
+      return /\/20\d\d\/\d\d\/\d\d\//.test(u.pathname) || /\/noticias\/\d+_/.test(u.pathname);
+    } catch { return false; }
+  }
+
+  function rssDate(s) {
+    const t = String(s || '').replace(/^[^,]+,\s*/, '').trim();
+    const d = new Date(t);
+    return isNaN(d.getTime()) ? 0 : d.getTime();
+  }
+
+  function fmtTs(ts) {
+    if (!ts) return '';
+    const d = new Date(ts);
+    const now = new Date();
+    const hh = String(d.getHours()).padStart(2, '0') + 'h' + String(d.getMinutes()).padStart(2, '0');
+    if (d.toDateString() === now.toDateString()) return 'hoje ' + hh;
+    const y = new Date(now);
+    y.setDate(y.getDate() - 1);
+    if (d.toDateString() === y.toDateString()) return 'ontem ' + hh;
+    return String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0') + ' ' + hh;
+  }
+
+  function parseUolFeed(txt) {
+    const items = [], seen = new Set();
+    const re = /<item>([\s\S]*?)<\/item>/g;
+    let m;
+    while ((m = re.exec(String(txt)))) {
+      const b = m[1];
+      const get = (tag) => {
+        const x = b.match(new RegExp('<' + tag + '>(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?<\\/' + tag + '>'));
+        return x ? x[1].replace(/<!\[CDATA\[|\]\]>/g, '').replace(/<[^>]+>/g, '') : '';
+      };
+      const title = get('title')
+        .replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+        .replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();
+      const link = get('link').trim();
+      const pd = get('pubDate');
+      if (!title || !link || !isUolArticle(link) || seen.has(link)) continue;
+      seen.add(link);
+      const ts = rssDate(pd);
+      items.push({ title: title, subtitle: '', url: link, date: fmtTs(ts), ts: ts, img: '' });
+    }
+    return items;
+  }
+
+  async function fetchUolFeed(feed) {
+    const cached = readNewsCache(feed.url);
+    if (cached) return cached.items;
+    try {
+      const res = await fetch('https://r.jina.ai/' + feed.url, { headers: { 'Accept': 'text/plain', 'X-Return-Format': 'text' } });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const items = parseUolFeed(await res.text());
+      try { localStorage.setItem(NEWS_KEY + encodeURIComponent(feed.url), JSON.stringify({ ts: Date.now(), items: items })); } catch {}
+      return items;
+    } catch { return []; }
+  }
+
+  async function loadUolFeed(feed) {
+    const items = await fetchUolFeed(feed);
+    if (uolSectionId !== feed.id) return;
+    uolItems = items;
+    if (!items.length) { uolStatus.textContent = 'Nenhuma notícia encontrada.'; return; }
+    renderUol(items);
+  }
+
+  async function loadUolAll() {
+    const feeds = UOL_FEEDS.filter(f => !f.all);
+    const lists = await Promise.all(feeds.map(fetchUolFeed));
+    if (uolSectionId !== 'todas') return;
+    const seen = new Set(), merged = [];
+    for (const arr of lists) {
+      for (const it of arr) {
+        if (seen.has(it.url)) continue;
+        seen.add(it.url);
+        merged.push(it);
+      }
+    }
+    merged.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+    uolItems = merged;
+    if (!merged.length) { uolStatus.textContent = 'Falha ao juntar os feeds do UOL.'; return; }
+    try { localStorage.setItem(NEWS_KEY + 'uol_todas', JSON.stringify({ ts: Date.now(), items: merged })); } catch {}
+    renderUol(merged);
+  }
+
+  function renderUol(items) {
+    uolItems = items;
+    const read = getRead();
+    let pool = filterByPeriod(items);
+    if (unreadOnly) pool = pool.filter(it => !read.has(it.url));
+    const page = pool.slice(0, uolShownLimit);
+    uolList.innerHTML = '';
+    if (!pool.length) {
+      uolStatus.textContent = items.length
+        ? (unreadOnly ? 'Nenhuma notícia não lida em ' : 'Nenhuma notícia em ') + periodLabel() + ' · amplie o período'
+        : 'Nenhuma notícia encontrada.';
+      return;
+    }
+    uolStatus.textContent = page.length + ' de ' + pool.length + ' notícias · ' + periodLabel() +
+      (unreadOnly ? ' · não lidas' : '') + ' · toque para ler';
+    for (const it of page) {
+      const a = document.createElement('a');
+      a.className = 'news-item';
+      a.href = it.url;
+      if (read.has(it.url)) a.classList.add('read');
+      a.onclick = (e) => {
+        e.preventDefault();
+        markRead(it.url);
+        a.classList.add('read');
+        addReadFlag(a);
+        input.value = it.url;
+        showView('reader');
+        load();
+        if (unreadOnly) renderUol(uolItems);
+      };
+      const info = document.createElement('div');
+      info.className = 'news-info';
+      const title = document.createElement('span');
+      title.className = 'news-title';
+      title.textContent = it.title;
+      info.appendChild(title);
+      if (it.date) {
+        const d = document.createElement('span');
+        d.className = 'news-date';
+        d.textContent = it.date;
+        info.appendChild(d);
+      }
+      a.appendChild(info);
+      if (read.has(it.url)) addReadFlag(a);
+      uolList.appendChild(a);
+    }
+    if (pool.length > page.length) {
+      const more = document.createElement('button');
+      more.type = 'button';
+      more.className = 'load-more';
+      more.textContent = 'Mostrar mais (' + Math.min(BATCH, pool.length - page.length) + ')';
+      more.onclick = () => { uolShownLimit += BATCH; renderUol(uolItems); };
+      uolList.appendChild(more);
+    }
+  }
+
   // --- Preferências de leitura ---
   const FONT_KEY = 'leitor_limpo_font_v1';
   const toTop = $('toTop');
@@ -1237,7 +1512,7 @@
   const topProgress = $('topProgress');
 
   function updateReadingProgress() {
-    const show = newsView.classList.contains('hidden') && output.innerHTML.trim() !== '';
+    const show = newsView.classList.contains('hidden') && uolView.classList.contains('hidden') && output.innerHTML.trim() !== '';
     readFooter.classList.toggle('hidden', !show);
     topProgress.classList.toggle('hidden', !show);
     if (!show) { topProgress.style.width = '0'; return; }
@@ -1367,15 +1642,19 @@
       confirmClear.classList.add('hidden');
       return;
     }
-    if (!newsView.classList.contains('hidden') && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
+    const onFolha = !newsView.classList.contains('hidden');
+    const onUol = !uolView.classList.contains('hidden');
+    if ((onFolha || onUol) && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
       const tag = (document.activeElement && document.activeElement.tagName) || '';
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-      const ids = SECTIONS.map(s => s.id);
-      let i = ids.indexOf(currentSection);
+      const list = onUol ? UOL_FEEDS : SECTIONS;
+      const cur = onUol ? uolSectionId : currentSection;
+      const ids = list.map(s => s.id);
+      let i = ids.indexOf(cur);
       if (i < 0) i = 0;
       i = (i + (e.key === 'ArrowRight' ? 1 : -1) + ids.length) % ids.length;
       e.preventDefault();
-      selectSection(ids[i]);
+      if (onUol) selectUolSection(ids[i]); else selectSection(ids[i]);
     }
   });
 
@@ -1385,8 +1664,10 @@
   const q = new URLSearchParams(location.search).get('u');
   if (q) { input.value = q; load(); }
 
-  // Aba de notícias via link direto (?v=news ou #noticias)
-  if (/[?&]v=news\b/.test(location.search) || location.hash === '#noticias') showView('news');
+  // Abas via link direto (?v=folha|uol, #noticias|#uol)
+  const vparam = new URLSearchParams(location.search).get('v');
+  if (vparam === 'uol' || location.hash === '#uol') showView('uol');
+  else if (vparam === 'news' || vparam === 'folha' || location.hash === '#noticias' || location.hash === '#folha') showView('folha');
 })();
 </script>
 </body>
