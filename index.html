@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Leitor Limpo</title>
+<title>Leitura Diária</title>
 
 <!-- PWA -->
 <link rel="manifest" href="manifest.webmanifest">
@@ -13,7 +13,7 @@
 <!-- iOS -->
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="Leitor">
+<meta name="apple-mobile-web-app-title" content="Leitura">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -124,7 +124,7 @@
 <body>
 
 <div class="topbar">
-  <h1 class="brand"><img src="icon-192.png" alt="" width="28" height="28">Leitor Limpo</h1>
+  <h1 class="brand"><img src="icon-192.png" alt="" width="28" height="28">Leitura Diária</h1>
 </div>
 
 <nav class="tabs">
@@ -238,7 +238,7 @@
     input.value = '';
     output.innerHTML = '';
     status.textContent = '';
-    document.title = 'Leitor Limpo';
+    document.title = 'Leitura Diária';
     confirmClear.classList.add('hidden');
     showView('reader');
     try { history.replaceState(null, '', location.pathname); } catch {}
@@ -471,7 +471,7 @@
       status.textContent = 'Pronto. ' + text.length + ' caracteres · ~' +
         Math.max(1, Math.round(words / 220)) + ' min de leitura';
       requestAnimationFrame(updateReadingProgress);
-      document.title = title + ' — Leitor Limpo';
+      document.title = title + ' — Leitura Diária';
       saveHistory(url, title);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (e) {
