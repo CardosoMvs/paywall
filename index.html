@@ -409,7 +409,9 @@
       selectors: ['[data-news-content-text]', '[itemprop="articleBody"]'],
       inline: 'article' },
     { host: /(^|\.)uol\.com\.br$/i,
-      selectors: ['article'],
+      selectors: ['.jupiter-paragraph-fragment', 'article'],
+      prefer: 'first',
+      clean: 'uol',
       inline: '' }
   ];
 
@@ -418,6 +420,17 @@
       const host = new URL(url).hostname;
       return SITE_SELECTORS.find(r => r.host.test(host)) || null;
     } catch { return null; }
+  }
+
+  function cleanUolMd(md) {
+    let blocks = String(md).split(/\n{2,}/).map(b => b.trim()).filter(Boolean);
+    const endRe = /^(#{1,6}\s*)?(Veja também|Relacionadas|As mais lidas agora|Comentários)\b/i;
+    const endIdx = blocks.findIndex(b => endRe.test(b));
+    if (endIdx > 0) blocks = blocks.slice(0, endIdx);
+    const junkStart = /^(#{1,6}\s*)?(Publicidade|Veja também|Relacionadas|Comunicar erro|Deixe seu comentário|As mais lidas agora|Acesse o UOL|Carregando)\b/i;
+    const junkAny = /Receba os novos posts|Email inválido|Só para assinantes|Quero receber|Assine UOL/i;
+    blocks = blocks.filter(b => !junkStart.test(b) && !junkAny.test(b));
+    return blocks.join('\n\n');
   }
 
   async function fetchArticle(url) {
@@ -440,16 +453,25 @@
     const results = await Promise.all(jobs);
     const full = results.pop();
     const contentLen = (s) => String(s || '').split('Markdown Content:').pop().trim().length;
+    const preferFirst = rule.prefer === 'first';
     let body = '', usedSel = sels[0] || '', best = -1;
     results.forEach((cand, i) => {
       const l = contentLen(cand);
-      if (l > best) { best = l; body = cand; usedSel = sels[i]; }
+      if (preferFirst) {
+        if (!body && l >= 400) { body = cand; usedSel = sels[i]; best = l; }
+      } else if (l > best) {
+        best = l; body = cand; usedSel = sels[i];
+      }
     });
     // Se nenhum seletor achar conteúdo, volta para a leitura completa
     if (best < 400) {
       return { text: await get({ 'Accept': 'text/plain' }), subtitle: '' };
     }
-    if (!rule.inline) return { text: body, subtitle: '' };
+    if (!rule.inline) {
+      let text = body;
+      if (rule.clean === 'uol') text = cleanUolMd(text);
+      return { text: text, subtitle: '' };
+    }
     const inlined = inlineArticle(body, full);
     if (inlined) return inlined;
     // Sem como posicionar as figuras: usa a lista de imagens no rodapé
@@ -552,7 +574,7 @@
     return b;
   }
 
-  const ART_KEY = 'leitor_limpo_articles_v1';
+  const ART_KEY = 'leitor_limpo_articles_v2';
 
   function readArtCache(url) {
     try {
@@ -609,7 +631,12 @@
 
   // --- Carregar artigo ---
   function renderArticleHead(title, url, subtitle) {
-    if (/^\s*<h1/i.test(output.innerHTML)) return;
+    const firstH1 = output.querySelector('h1');
+    if (firstH1) {
+      const a = firstH1.textContent.replace(/\s+/g, ' ').trim().toLowerCase();
+      const b = String(title).replace(/\s+/g, ' ').trim().toLowerCase();
+      if (a === b || (a.length > 20 && b.length > 20 && (a.startsWith(b) || b.startsWith(a)))) firstH1.remove();
+    }
     const head = document.createElement('header');
     head.className = 'article-head';
     const backTab = sourceInfo(url).kind === 'uol' ? 'uol' : 'folha';
