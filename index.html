@@ -73,7 +73,9 @@
   .sections { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
   .sections button { background: transparent; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px; font-size: 13px; }
   .sections button.active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
-  .sections.subs { margin-top: -8px; }
+  .row-label { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 7px; }
+  .subs-row { margin: 0 0 16px; padding: 10px 0 0 14px; border-left: 2px solid #dfe6ef; }
+  .sections.subs { margin: 0; }
   .sections.subs button { font-size: 12px; padding: 5px 10px; background: #eef2f7; border-color: #eef2f7; color: #36506b; }
   .sections.subs button:hover { background: #e2e9f2; }
   .sections.subs button.active { background: #36506b; border-color: #36506b; color: #fff; }
@@ -131,8 +133,12 @@
 </div>
 
 <div id="newsView" class="hidden">
+  <div class="row-label">Seções</div>
   <div class="sections" id="newsSections"></div>
-  <div class="sections subs" id="newsSubs"></div>
+  <div class="subs-row hidden" id="subsRow">
+    <div class="row-label" id="subsLabel">Tópicos</div>
+    <div class="sections subs" id="newsSubs"></div>
+  </div>
   <div id="newsStatus" class="hint"></div>
   <div id="newsList"></div>
 </div>
@@ -430,6 +436,7 @@
   const readerView = $('readerView'), newsView = $('newsView');
   const tabReader = $('tabReader'), tabNews = $('tabNews');
   const newsSections = $('newsSections'), newsSubs = $('newsSubs');
+  const subsRow = $('subsRow'), subsLabel = $('subsLabel');
   const newsStatus = $('newsStatus'), newsList = $('newsList');
   const NEWS_KEY = 'leitor_limpo_news_v1_';
   let currentSection = 'ultimas';
@@ -463,6 +470,7 @@
     currentFeed = { url: sec.url, label: sec.label };
     for (const b of newsSections.children) b.classList.toggle('active', b.dataset.id === id);
     newsSubs.innerHTML = '';
+    subsRow.classList.add('hidden');
     openFeed();
   }
 
@@ -531,6 +539,12 @@
     newsSubs.innerHTML = '';
     if (currentFeed.url !== sectionUrl) newsSubs.appendChild(subChip('Tudo', sectionUrl));
     for (const t of currentTopics) newsSubs.appendChild(subChip(t.label, t.url));
+    const has = newsSubs.children.length > 0;
+    subsRow.classList.toggle('hidden', !has);
+    if (has) {
+      const sec = SECTIONS.find(s => s.url === sectionUrl);
+      subsLabel.textContent = 'Tópicos de ' + (sec ? sec.label : 'seção');
+    }
   }
 
   function subChip(label, url) {
