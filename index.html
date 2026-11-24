@@ -114,13 +114,12 @@
 </div>
 
 <div class="actions">
-  <button id="btnArchive">Abrir no archive.ph</button>
   <button id="btnClear">Limpar histórico</button>
   <button id="fontMinus" type="button" aria-label="Diminuir fonte">A−</button>
   <button id="fontPlus" type="button" aria-label="Aumentar fonte">A+</button>
 </div>
 
-<p class="hint">Extrai o texto via r.jina.ai. Se falhar, use os botões de fallback acima.</p>
+<p class="hint">Extrai o texto via r.jina.ai.</p>
 
 <div id="status"></div>
 <article id="output"></article>
@@ -406,7 +405,7 @@
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (e) {
       status.innerHTML = 'Falha: ' + esc(e.message) +
-        '<br>Use <strong>Abrir no archive.ph</strong> ou cole a URL manualmente lá.';
+        '<br>Tente novamente ou abra a URL diretamente no navegador.';
     } finally {
       goBtn.disabled = false;
     }
@@ -414,12 +413,6 @@
 
   goBtn.onclick = load;
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') load(); });
-
-  $('btnArchive').onclick = () => {
-    const url = input.value.trim();
-    const target = url ? 'https://archive.ph/newest/' + encodeURIComponent(url) : 'https://archive.ph/';
-    window.open(target, '_blank', 'noopener');
-  };
 
   // --- Notícias (manchetes das seções da Folha) ---
   const SECTIONS = [
