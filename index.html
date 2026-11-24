@@ -15,6 +15,9 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Leitor">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:opsz,wght@7..72,400;7..72,600&amp;family=Lora:wght@400;600&amp;family=Merriweather:wght@400;700&amp;display=swap">
 
 <style>
   :root { color-scheme: light; --bg:#FBF8F1; --fg:#222; --muted:#6f6a60; --line:#e6dfd1; --accent:#222;
@@ -47,6 +50,8 @@
   .actions button svg { vertical-align: -2px; margin-right: 5px; }
   .actions button.icon-btn { padding: 8px 10px; }
   .actions button.icon-btn svg { margin-right: 0; display: block; }
+  .aa { font-size: 14px; font-weight: 600; line-height: 1; }
+  .color-a { font-family: var(--serif); font-size: 15px; font-weight: 700; line-height: 1; border-bottom: 3px solid #222; padding-bottom: 1px; }
   .confirm { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; font-size: 13px; }
   .confirm.hidden { display: none; }
   .confirm button { font-size: 12px; padding: 6px 10px; }
@@ -126,8 +131,10 @@
 </div>
 
 <div class="actions">
-  <button id="btnClear"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M4 6h16M9 6V4h6v2M18 6l-1 14H7L6 6M10 11v5M14 11v5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>Limpar histórico</button>
   <button id="btnHome" class="icon-btn" type="button" aria-label="Ir para o início" title="Início"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M3 11l9-8 9 8M5 10v10h5v-6h4v6h5V10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+  <button id="btnClear" class="icon-btn" type="button" aria-label="Limpar histórico" title="Limpar histórico"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M4 6h16M9 6V4h6v2M18 6l-1 14H7L6 6M10 11v5M14 11v5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+  <button id="btnFont" class="icon-btn" type="button" aria-label="Mudar fonte" title="Fonte: Georgia"><span class="aa">Aa</span></button>
+  <button id="btnColor" class="icon-btn" type="button" aria-label="Mudar cor do texto" title="Cor do texto"><span class="color-a">A</span></button>
   <button id="fontMinus" type="button" aria-label="Diminuir fonte">A−</button>
   <button id="fontPlus" type="button" aria-label="Aumentar fonte">A+</button>
 </div>
@@ -751,6 +758,52 @@
     fontSize = Math.min(26, fontSize + 1);
     applyFont();
     try { localStorage.setItem(FONT_KEY, fontSize); } catch {}
+  };
+
+  // --- Fonte e cor do texto (cíclicos: um clique muda para a próxima) ---
+  const FONTS = [
+    { name: 'Georgia', css: 'Georgia, "Times New Roman", serif' },
+    { name: 'Literata', css: '"Literata", Georgia, serif' },
+    { name: 'Lora', css: '"Lora", Georgia, serif' },
+    { name: 'Merriweather', css: '"Merriweather", Georgia, serif' }
+  ];
+  const TEXT_COLORS = ['#222222', '#4a3b2a', '#263d5c', '#5a2f2f'];
+  const TYPEFACE_KEY = 'leitor_limpo_typeface_v1';
+  const TEXT_COLOR_KEY = 'leitor_limpo_color_v1';
+  const btnFont = $('btnFont'), btnColor = $('btnColor');
+  const aaPreview = btnFont.querySelector('.aa');
+  const colorPreview = btnColor.querySelector('.color-a');
+  let fontIndex = 0, colorIndex = 0;
+  try { fontIndex = parseInt(localStorage.getItem(TYPEFACE_KEY), 10) || 0; } catch {}
+  try { colorIndex = parseInt(localStorage.getItem(TEXT_COLOR_KEY), 10) || 0; } catch {}
+
+  function applyTypeface() {
+    const f = FONTS[fontIndex % FONTS.length];
+    output.style.fontFamily = f.css;
+    aaPreview.style.fontFamily = f.css;
+    btnFont.title = 'Fonte: ' + f.name;
+    btnFont.setAttribute('aria-label', 'Mudar fonte (atual: ' + f.name + ')');
+    updateReadingProgress();
+  }
+  function applyTextColor() {
+    const c = TEXT_COLORS[colorIndex % TEXT_COLORS.length];
+    output.style.color = c;
+    colorPreview.style.color = c;
+    colorPreview.style.borderBottomColor = c;
+    btnColor.title = 'Cor do texto: ' + c;
+    btnColor.setAttribute('aria-label', 'Mudar cor do texto (atual: ' + c + ')');
+  }
+  applyTypeface();
+  applyTextColor();
+  btnFont.onclick = () => {
+    fontIndex = (fontIndex + 1) % FONTS.length;
+    applyTypeface();
+    try { localStorage.setItem(TYPEFACE_KEY, fontIndex); } catch {}
+  };
+  btnColor.onclick = () => {
+    colorIndex = (colorIndex + 1) % TEXT_COLORS.length;
+    applyTextColor();
+    try { localStorage.setItem(TEXT_COLOR_KEY, colorIndex); } catch {}
   };
   window.addEventListener('scroll', () => {
     toTop.classList.toggle('hidden', window.scrollY < 600);
