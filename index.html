@@ -52,6 +52,8 @@
   .actions button.icon-btn svg { margin-right: 0; display: block; }
   .aa { font-size: 14px; font-weight: 600; line-height: 1; }
   .color-a { font-family: var(--serif); font-size: 15px; font-weight: 700; line-height: 1; border-bottom: 3px solid #222; padding-bottom: 1px; }
+  .bg-swatch { width: 14px; height: 14px; border-radius: 50%; display: block; background: #FBF8F1; border: 1px solid rgba(0,0,0,.25); }
+  .tex-swatch { width: 14px; height: 14px; border-radius: 3px; display: block; background-color: #FBF8F1; border: 1px solid rgba(0,0,0,.2); }
   .confirm { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; font-size: 13px; }
   .confirm.hidden { display: none; }
   .confirm button { font-size: 12px; padding: 6px 10px; }
@@ -81,7 +83,7 @@
   .to-top { position: fixed; right: 16px; bottom: 68px; width: 44px; height: 44px; border-radius: 50%; padding: 0; font-size: 18px; box-shadow: 0 2px 10px rgba(0,0,0,.18); }
   .read-footer { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; display: flex; justify-content: center; gap: 6px;
     padding: 8px 16px calc(8px + env(safe-area-inset-bottom));
-    background: rgba(251,248,241,.95); border-top: 1px solid var(--line);
+    background: var(--bg); background: color-mix(in srgb, var(--bg) 95%, transparent); border-top: 1px solid var(--line);
     font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; pointer-events: none; }
   .read-footer.hidden { display: none; }
 
@@ -145,6 +147,8 @@
 <div class="actions">
   <button id="btnHome" class="icon-btn" type="button" aria-label="Ir para o início" title="Início"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M3 11l9-8 9 8M5 10v10h5v-6h4v6h5V10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
   <button id="btnClear" class="icon-btn" type="button" aria-label="Limpar histórico" title="Limpar histórico"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M4 6h16M9 6V4h6v2M18 6l-1 14H7L6 6M10 11v5M14 11v5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+  <button id="btnBg" class="icon-btn" type="button" aria-label="Mudar cor de fundo" title="Fundo: creme"><span class="bg-swatch"></span></button>
+  <button id="btnTexture" class="icon-btn" type="button" aria-label="Mudar textura do fundo" title="Textura: nenhuma"><span class="tex-swatch"></span></button>
   <button id="btnFont" class="icon-btn" type="button" aria-label="Mudar fonte" title="Fonte: Georgia"><span class="aa">Aa</span></button>
   <button id="btnColor" class="icon-btn" type="button" aria-label="Mudar cor do texto" title="Cor do texto"><span class="color-a">A</span></button>
   <button id="fontMinus" type="button" aria-label="Diminuir fonte">A−</button>
@@ -1037,6 +1041,61 @@
     applyTextColor();
     try { localStorage.setItem(TEXT_COLOR_KEY, colorIndex); } catch {}
   };
+
+  // --- Fundo da página (cor e textura) ---
+  const BGS = [
+    { name: 'creme', color: '#FBF8F1' },
+    { name: 'branco', color: '#FFFFFF' },
+    { name: 'areia', color: '#F2E8D5' },
+    { name: 'cinza', color: '#EAEDF0' }
+  ];
+  const TEXTURES = [
+    { name: 'nenhuma', css: 'none', size: '' },
+    { name: 'pontos', css: 'radial-gradient(rgba(0,0,0,.07) 1px, transparent 1.2px)', size: '12px 12px' },
+    { name: 'linhas', css: 'repeating-linear-gradient(0deg, rgba(0,0,0,.05) 0 1px, transparent 1px 26px)', size: 'auto' },
+    { name: 'xadrez', css: 'repeating-linear-gradient(45deg, rgba(0,0,0,.04) 0 1px, transparent 1px 16px), repeating-linear-gradient(-45deg, rgba(0,0,0,.04) 0 1px, transparent 1px 16px)', size: 'auto' }
+  ];
+  const BG_KEY = 'leitor_limpo_bg_v1';
+  const TEX_KEY = 'leitor_limpo_texture_v1';
+  const btnBg = $('btnBg'), btnTexture = $('btnTexture');
+  const bgSwatch = btnBg.querySelector('.bg-swatch');
+  const texSwatch = btnTexture.querySelector('.tex-swatch');
+  let bgIndex = 0, texIndex = 0;
+  try { bgIndex = parseInt(localStorage.getItem(BG_KEY), 10) || 0; } catch {}
+  try { texIndex = parseInt(localStorage.getItem(TEX_KEY), 10) || 0; } catch {}
+
+  function applyBg() {
+    const b = BGS[bgIndex % BGS.length];
+    document.documentElement.style.setProperty('--bg', b.color);
+    bgSwatch.style.background = b.color;
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', b.color);
+    btnBg.title = 'Fundo: ' + b.name;
+    btnBg.setAttribute('aria-label', 'Mudar cor de fundo (atual: ' + b.name + ')');
+    applyTexture();
+  }
+  function applyTexture() {
+    const t = TEXTURES[texIndex % TEXTURES.length];
+    document.body.style.backgroundImage = t.css === 'none' ? '' : t.css;
+    document.body.style.backgroundSize = t.size || '';
+    texSwatch.style.backgroundImage = t.css === 'none' ? '' : t.css;
+    texSwatch.style.backgroundSize = t.size || '';
+    texSwatch.style.backgroundColor = BGS[bgIndex % BGS.length].color;
+    btnTexture.title = 'Textura: ' + t.name;
+    btnTexture.setAttribute('aria-label', 'Mudar textura do fundo (atual: ' + t.name + ')');
+  }
+  applyBg();
+  btnBg.onclick = () => {
+    bgIndex = (bgIndex + 1) % BGS.length;
+    applyBg();
+    try { localStorage.setItem(BG_KEY, bgIndex); } catch {}
+  };
+  btnTexture.onclick = () => {
+    texIndex = (texIndex + 1) % TEXTURES.length;
+    applyTexture();
+    try { localStorage.setItem(TEX_KEY, texIndex); } catch {}
+  };
+
   window.addEventListener('scroll', () => {
     toTop.classList.toggle('hidden', window.scrollY < 600);
     updateReadingProgress();
