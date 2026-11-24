@@ -48,6 +48,8 @@
     font-size: 17px; line-height: 1.65;
   }
   #output img { max-width: 100%; height: auto; border-radius: 6px; }
+  #output ul.images { list-style: none; padding-left: 0; }
+  #output ul.images li { margin: 14px 0; }
   #output a { color: inherit; }
   #output h1, #output h2, #output h3 { line-height: 1.25; margin-top: 1.4em; }
   #output pre, #output code { background: rgba(127,127,127,.12); padding: 2px 4px; border-radius: 4px; font-size: 14px; overflow-x: auto; }
@@ -149,6 +151,7 @@
       t = esc(t);
       t = t.replace(/!\[([^\]]*)\]\(\s*((?:[^()\s]|\([^()\s]*\))+)(?:\s+(?:&quot;.*?&quot;|&#39;.*?&#39;))?\s*\)/g, (m, alt, src) => {
         const u = safeUrl(src, true);
+        alt = alt.replace(/^Image\s+[\d,\s]+:\s*/, '');
         return u ? `<img alt="${alt}" src="${u}" loading="lazy">` : '';
       });
       t = t.replace(/\[((?:[^\[\]]|\[[^\[\]]*\])*)\]\(\s*((?:[^()\s]|\([^()\s]*\))+)(?:\s+(?:&quot;.*?&quot;|&#39;.*?&#39;))?\s*\)/g, (m, label, href) => {
@@ -187,6 +190,9 @@
     }
     flushPara(); closeList();
     if (inCode) html += '</pre>';
+    // Seção "Images:" que o Jina anexa ao final (X-With-Images-Summary)
+    html = html.replace(/<p>Images:<\/p>/g, '<h2>Imagens</h2>')
+               .replace(/<ul>(?=\s*(?:<li><img[^>]*><\/li>\s*)+<\/ul>)/g, '<ul class="images">');
     return html;
   }
 
@@ -219,7 +225,11 @@
     };
     const selector = targetSelectorFor(url);
     if (!selector) return get({ 'Accept': 'text/plain' });
-    const targeted = await get({ 'Accept': 'text/plain', 'X-Target-Selector': selector });
+    const targeted = await get({
+      'Accept': 'text/plain',
+      'X-Target-Selector': selector,
+      'X-With-Images-Summary': 'true'
+    });
     // Se o seletor não achar conteúdo, volta para a leitura completa
     if (targeted.split('Markdown Content:').pop().trim().length < 400) {
       return get({ 'Accept': 'text/plain' });
