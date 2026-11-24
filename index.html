@@ -109,7 +109,12 @@
   .sections button { background: transparent; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px; font-size: 13px; }
   .sections button.active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
   .row-label { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 7px; }
-  .subs-row { margin: 0 0 16px; padding: 10px 0 0 14px; border-left: 2px solid #dfe6ef; }
+  .topic-panel { position: relative; margin: -7px 0 16px; padding: 10px 14px 12px; background: #f5f8fc; border: 1px solid #dde6f0; border-radius: 12px; }
+  .topic-panel::before { content: ''; position: absolute; top: -8px; left: var(--caret-x, 30px); width: 14px; height: 14px; background: #f5f8fc; border-left: 1px solid #dde6f0; border-top: 1px solid #dde6f0; transform: translateX(-50%) rotate(45deg); }
+  .topic-panel.hidden { display: none; }
+  .topic-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+  .topic-section { font-family: var(--serif); font-size: 15px; font-weight: 700; color: #36506b; }
+  .topic-caption { font-size: 10px; text-transform: uppercase; letter-spacing: .09em; color: var(--muted); }
   .sections.subs { margin: 0; }
   .sections.subs button { font-size: 12px; padding: 5px 10px; background: #eef2f7; border-color: #eef2f7; color: #36506b; }
   .sections.subs button:hover { background: #e2e9f2; }
@@ -195,8 +200,11 @@
     <button id="newsRefresh" class="refresh" type="button" title="Atualizar notícias">↻ Atualizar</button>
   </div>
   <div class="sections" id="newsSections"></div>
-  <div class="subs-row hidden" id="subsRow">
-    <div class="row-label" id="subsLabel">Tópicos</div>
+  <div class="topic-panel hidden" id="subsRow">
+    <div class="topic-head">
+      <span class="topic-section" id="subsSection">Seção</span>
+      <span class="topic-caption">tópicos</span>
+    </div>
     <div class="sections subs" id="newsSubs"></div>
   </div>
   <div class="filters-line">
@@ -692,7 +700,7 @@
   const readerView = $('readerView'), newsView = $('newsView');
   const tabReader = $('tabReader'), tabNews = $('tabNews');
   const newsSections = $('newsSections'), newsSubs = $('newsSubs');
-  const subsRow = $('subsRow'), subsLabel = $('subsLabel');
+  const subsRow = $('subsRow'), subsSection = $('subsSection');
   const newsStatus = $('newsStatus'), newsList = $('newsList');
   const NEWS_KEY = 'leitor_limpo_news_v3_';
   const READ_KEY = 'leitor_limpo_read_v1';
@@ -952,9 +960,23 @@
     subsRow.classList.toggle('hidden', !has);
     if (has) {
       const sec = SECTIONS.find(s => s.url === sectionUrl);
-      subsLabel.textContent = 'Tópicos de ' + (sec ? sec.label : 'seção');
+      subsSection.textContent = sec ? sec.label : 'Seção';
+      positionCaret();
+      requestAnimationFrame(positionCaret);
+      setTimeout(positionCaret, 0);
     }
   }
+
+  function positionCaret() {
+    if (subsRow.classList.contains('hidden')) return;
+    const active = Array.from(newsSections.children).find(b => b.dataset.id === currentSection);
+    if (!active) return;
+    const rowRect = newsSections.getBoundingClientRect();
+    const btnRect = active.getBoundingClientRect();
+    const x = btnRect.left - rowRect.left + btnRect.width / 2;
+    subsRow.style.setProperty('--caret-x', Math.max(18, Math.min(rowRect.width - 18, x)) + 'px');
+  }
+  window.addEventListener('resize', positionCaret);
 
   function subChip(label, url) {
     const b = document.createElement('button');
