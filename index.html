@@ -74,6 +74,7 @@
   .brand { font-family: var(--serif); }
   .article-head { margin-bottom: 18px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
   .article-head h1 { margin: 0 0 6px; line-height: 1.25; }
+  .article-sub { font-family: var(--serif); font-size: 15px; color: var(--muted); margin: 6px 0 0; line-height: 1.5; }
   .article-head a { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 13px; color: var(--muted); }
   .article-head .back-news { background: none; border: 0; padding: 0; margin: 0 0 8px; color: var(--muted); font-size: 13px; cursor: pointer; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
   .article-head .back-news:hover { text-decoration: underline; }
@@ -341,7 +342,9 @@
   // Sites em que o Jina precisa de um seletor para não trazer menu/rodapé.
   // "inline" é um seletor mais amplo, usado só para achar a posição das figuras.
   const SITE_SELECTORS = [
-    { host: /(^|\.)folha\.uol\.com\.br$/i, selector: '.c-news__body', inline: 'article' }
+    { host: /(^|\.)folha\.uol\.com\.br$/i,
+      selectors: ['[data-news-content-text]', '[itemprop="articleBody"]'],
+      inline: 'article' }
   ];
 
   function siteRuleFor(url) {
@@ -359,23 +362,34 @@
       return res.text();
     };
     const rule = siteRuleFor(url);
-    if (!rule) return get({ 'Accept': 'text/plain' });
-    const [body, full] = await Promise.all([
-      get({ 'Accept': 'text/plain', 'X-Target-Selector': rule.selector }),
-      get({ 'Accept': 'text/plain', 'X-Target-Selector': rule.inline }).catch(() => '')
+    if (!rule) return { text: await get({ 'Accept': 'text/plain' }), subtitle: '' };
+    const tryGet = async (headers) => {
+      try { return await get(headers); } catch { return ''; }
+    };
+    const [a, b, full] = await Promise.all([
+      tryGet({ 'Accept': 'text/plain', 'X-Target-Selector': rule.selectors[0] }),
+      tryGet({ 'Accept': 'text/plain', 'X-Target-Selector': rule.selectors[1] }),
+      tryGet({ 'Accept': 'text/plain', 'X-Target-Selector': rule.inline })
     ]);
-    // Se o seletor não achar conteúdo, volta para a leitura completa
-    if (body.split('Markdown Content:').pop().trim().length < 400) {
-      return get({ 'Accept': 'text/plain' });
+    const contentLen = (s) => String(s || '').split('Markdown Content:').pop().trim().length;
+    const useA = contentLen(a) >= contentLen(b);
+    const body = useA ? a : b;
+    const usedSel = useA ? rule.selectors[0] : rule.selectors[1];
+    // Se nenhum seletor achar conteúdo, volta para a leitura completa
+    if (contentLen(body) < 400) {
+      return { text: await get({ 'Accept': 'text/plain' }), subtitle: '' };
     }
     const inlined = inlineArticle(body, full);
     if (inlined) return inlined;
     // Sem como posicionar as figuras: usa a lista de imagens no rodapé
-    return get({
-      'Accept': 'text/plain',
-      'X-Target-Selector': rule.selector,
-      'X-With-Images-Summary': 'true'
-    });
+    return {
+      text: await get({
+        'Accept': 'text/plain',
+        'X-Target-Selector': usedSel,
+        'X-With-Images-Summary': 'true'
+      }),
+      subtitle: ''
+    };
   }
 
   // Monta o texto do corpo preservando figuras e legendas na posição original:
@@ -388,13 +402,14 @@
       .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
       .replace(/[*_`#>]/g, '')
       .replace(/\s+/g, ' ').trim();
-    const body = blocks(bodyMd);
-    const art = blocks(fullMd);
+    const promo = (b) => /login\.folha\.com\.br\/newsletter|Receba no seu email/i.test(b);
+    const body = blocks(bodyMd).filter(b => !promo(b));
+    const art = blocks(fullMd).filter(b => !promo(b));
     if (!body.length || !art.length) return null;
     const isFigure = (b) => b.indexOf('![') >= 0 && plain(b) === '';
     const same = (a, b) => !!a && !!b && (a === b || (a.length > 30 && b.length > 30 && a.slice(0, 80) === b.slice(0, 80)));
     const figs = [];
-    let seen = 0;
+    let seen = 0, start = -1;
     for (let i = 0; i < art.length; i++) {
       const b = art[i];
       if (isFigure(b)) {
@@ -410,11 +425,24 @@
         continue;
       }
       if (same(plain(b), plain(body[seen]))) {
+        if (start < 0) start = i;
         seen++;
         if (seen === body.length) break; // fim do corpo do artigo
       }
     }
     if (seen < body.length) return null;
+    let subtitle = '';
+    const uiText = /link externo|abre p[áa]gina|diminuir fonte|aumentar fonte|edi[çc][ãa]o impressa|compartilhar|recurso exclusivo|fa[çc]a login|assinantes?|acessos? por dia|conte[úu]dos da folha|link presente|gostou deste texto|benef[íi]cio do assinante|dar de presente/i;
+    if (start > 0) {
+      for (let i = start - 1; i >= 0; i--) {
+        if (!/[-*+]\s/.test(art[i]) || uiText.test(art[i])) continue;
+        const items = art[i].split(/\s*[-*+]\s+/).map(s => s
+          .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+          .replace(/[*_`#>]/g, '')
+          .trim()).filter(s => s.length >= 20);
+        if (items.length) { subtitle = items.slice(0, 2).join(' · '); break; }
+      }
+    }
     const out = [];
     for (let p = 0; p <= body.length; p++) {
       if (p > 0) out.push(body[p - 1]);
@@ -424,11 +452,11 @@
     }
     // Mantém Title/Published Time para o título da página e do cabeçalho
     const meta = String(bodyMd).split('Markdown Content:')[0];
-    return meta + 'Markdown Content:\n\n' + out.join('\n\n');
+    return { text: meta + 'Markdown Content:\n\n' + out.join('\n\n'), subtitle };
   }
 
   // --- Carregar artigo ---
-  function renderArticleHead(title, url) {
+  function renderArticleHead(title, url, subtitle) {
     if (/^\s*<h1/i.test(output.innerHTML)) return;
     const head = document.createElement('header');
     head.className = 'article-head';
@@ -446,8 +474,38 @@
     src.target = '_blank';
     src.rel = 'noopener';
     src.textContent = 'Abrir no site' + (host ? ' · ' + host : '');
-    head.append(back, h, src);
+    head.append(back, h);
+    if (subtitle) {
+      const sub = document.createElement('p');
+      sub.className = 'article-sub';
+      sub.textContent = subtitle;
+      head.appendChild(sub);
+    }
+    head.appendChild(src);
     output.prepend(head);
+  }
+
+  // Formatos que não são artigos legíveis: coberturas ao vivo e podcasts
+  function specialKind(url) {
+    try {
+      const u = new URL(url);
+      if (/(^|\.)aovivo\./i.test(u.hostname)) return 'live';
+      if (/^\/podcasts\//.test(u.pathname)) return 'podcast';
+    } catch {}
+    return '';
+  }
+
+  function renderSpecial(url, kind) {
+    const title = kind === 'live' ? 'Cobertura ao vivo' : 'Podcast';
+    const sub = kind === 'live'
+      ? 'Esta cobertura é carregada pelo site da Folha. Abra no site para acompanhar as atualizações.'
+      : 'Episódio de podcast. Abra no site para ouvir.';
+    output.innerHTML = '';
+    renderArticleHead(title, url, sub);
+    status.textContent = title;
+    document.title = title + ' — Leitura Diária';
+    requestAnimationFrame(updateReadingProgress);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
   let loadToken = 0;
@@ -456,20 +514,28 @@
     const token = ++loadToken;
     const url = input.value.trim();
     if (!url) { status.textContent = 'Cole uma URL primeiro.'; return; }
+    const kind = specialKind(url);
+    if (kind) {
+      renderSpecial(url, kind);
+      saveHistory(url, kind === 'live' ? 'Cobertura ao vivo' : 'Podcast');
+      return;
+    }
     output.innerHTML = '';
     updateReadingProgress();
     status.textContent = 'Extraindo… (pode levar alguns segundos)';
     goBtn.disabled = true;
     try {
-      const text = await fetchArticle(url);
+      const article = await fetchArticle(url);
+      const text = article.text;
       if (token !== loadToken) return;
       if (!text || text.length < 200) throw new Error('Conteúdo muito curto ou vazio');
       const title = extractTitle(text) || url;
       output.innerHTML = mdToHtml(text);
-      renderArticleHead(title, url);
+      renderArticleHead(title, url, article.subtitle);
       const words = (text.match(/\S+/g) || []).length;
       status.textContent = 'Pronto. ' + text.length + ' caracteres · ~' +
-        Math.max(1, Math.round(words / 220)) + ' min de leitura';
+        Math.max(1, Math.round(words / 220)) + ' min de leitura' +
+        (text.length < 1200 ? ' · conteúdo curto (pode ser paywall)' : '');
       requestAnimationFrame(updateReadingProgress);
       document.title = title + ' — Leitura Diária';
       saveHistory(url, title);
