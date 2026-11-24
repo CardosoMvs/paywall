@@ -278,7 +278,7 @@
       const a = document.createElement('a');
       a.href = '#';
       a.appendChild(sourceBadge(item.url));
-      a.appendChild(document.createTextNode(' ' + item.title));
+      a.appendChild(document.createTextNode(' ' + decodeEntities(item.title)));
       a.title = item.url;
       a.onclick = (e) => { e.preventDefault(); input.value = item.url; load(); };
       historyList.appendChild(a);
@@ -314,6 +314,16 @@
   function esc(s) {
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  function decodeEntities(s) {
+    const t = String(s || '');
+    const clean = (v) => v.replace(/[​-‍﻿]/g, '').trim();
+    if (t.indexOf('&') < 0) return clean(t);
+    try {
+      const doc = new DOMParser().parseFromString(t, 'text/html');
+      return clean(doc.body ? doc.body.textContent : t);
+    } catch { return clean(t); }
   }
 
   // Só deixa passar URLs seguras (bloqueia javascript:, data:, vbscript: etc.)
@@ -397,9 +407,9 @@
 
   function extractTitle(md) {
     const t = md.match(/^Title:\s*(.+)$/m);
-    if (t) return t[1].trim();
+    if (t) return decodeEntities(t[1].trim());
     const h = md.match(/^#\s+(.+)$/m);
-    return h ? h[1].trim() : null;
+    return h ? decodeEntities(h[1].trim()) : null;
   }
 
   // Sites em que o Jina precisa de um seletor para não trazer menu/rodapé.
@@ -631,10 +641,11 @@
 
   // --- Carregar artigo ---
   function renderArticleHead(title, url, subtitle) {
+    const cleanTitle = decodeEntities(title);
     const firstH1 = output.querySelector('h1');
     if (firstH1) {
       const a = firstH1.textContent.replace(/\s+/g, ' ').trim().toLowerCase();
-      const b = String(title).replace(/\s+/g, ' ').trim().toLowerCase();
+      const b = String(cleanTitle).replace(/\s+/g, ' ').trim().toLowerCase();
       if (a === b || (a.length > 20 && b.length > 20 && (a.startsWith(b) || b.startsWith(a)))) firstH1.remove();
     }
     const head = document.createElement('header');
@@ -646,7 +657,7 @@
     back.textContent = '← ' + (backTab === 'uol' ? 'UOL' : 'Folha');
     back.onclick = () => showView(backTab);
     const h = document.createElement('h1');
-    h.textContent = title;
+    h.textContent = cleanTitle;
     let host = '';
     try { host = new URL(url).hostname.replace(/^www\d*\./i, ''); } catch {}
     const src = document.createElement('a');
@@ -658,7 +669,7 @@
     if (subtitle) {
       const sub = document.createElement('p');
       sub.className = 'article-sub';
-      sub.textContent = subtitle;
+      sub.textContent = decodeEntities(subtitle);
       head.appendChild(sub);
     }
     head.appendChild(sourceBadge(url));
@@ -668,7 +679,7 @@
     share.className = 'share-btn';
     share.textContent = 'Compartilhar';
     share.onclick = async () => {
-      const ok = await shareArticle(url, title);
+      const ok = await shareArticle(url, cleanTitle);
       if (ok === true) {
         share.textContent = 'Link copiado';
         setTimeout(() => { share.textContent = 'Compartilhar'; }, 1600);
@@ -728,7 +739,7 @@
       if (token !== loadToken) return;
       const text = article.text;
       if (!text || text.length < 200) throw new Error('Conteúdo muito curto ou vazio');
-      const title = article.title || extractTitle(text) || url;
+      const title = decodeEntities(article.title || extractTitle(text) || url);
       output.innerHTML = mdToHtml(text);
       renderArticleHead(title, url, article.subtitle);
       const words = (text.match(/\S+/g) || []).length;
@@ -1277,12 +1288,12 @@
       info.className = 'news-info';
       const title = document.createElement('span');
       title.className = 'news-title';
-      title.textContent = it.title;
+      title.textContent = decodeEntities(it.title);
       info.appendChild(title);
       if (it.subtitle) {
         const sub = document.createElement('span');
         sub.className = 'news-sub';
-        sub.textContent = it.subtitle;
+        sub.textContent = decodeEntities(it.subtitle);
         info.appendChild(sub);
       }
       if (it.date) {
@@ -1423,9 +1434,9 @@
         const x = b.match(new RegExp('<' + tag + '>(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?<\\/' + tag + '>'));
         return x ? x[1].replace(/<!\[CDATA\[|\]\]>/g, '').replace(/<[^>]+>/g, '') : '';
       };
-      const title = get('title')
+      const title = decodeEntities(get('title')
         .replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
-        .replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();
+        .replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim());
       const link = get('link').trim();
       const pd = get('pubDate');
       if (!title || !link || !isUolArticle(link) || seen.has(link)) continue;
@@ -1509,7 +1520,7 @@
       info.className = 'news-info';
       const title = document.createElement('span');
       title.className = 'news-title';
-      title.textContent = it.title;
+      title.textContent = decodeEntities(it.title);
       info.appendChild(title);
       if (it.date) {
         const d = document.createElement('span');
