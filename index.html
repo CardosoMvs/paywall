@@ -1440,9 +1440,14 @@
       const link = get('link').trim();
       const pd = get('pubDate');
       if (!title || !link || !isUolArticle(link) || seen.has(link)) continue;
+      const descRaw = (b.match(/<description>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/description>/) || [])[1] || '';
+      const imgM = descRaw.match(/<img[^>]+src=["']([^"']+)["']/i);
+      let img = imgM ? imgM[1] : '';
+      if (/^http:\/\//i.test(img)) img = img.replace(/^http:/i, 'https:');
+      if (!/^https:\/\//i.test(img) || /placeholder|loading|spin\.gif/i.test(img)) img = '';
       seen.add(link);
       const ts = rssDate(pd);
-      items.push({ title: title, subtitle: '', url: link, date: fmtTs(ts), ts: ts, img: '' });
+      items.push({ title: title, subtitle: '', url: link, date: fmtTs(ts), ts: ts, img: img });
     }
     return items;
   }
@@ -1530,6 +1535,13 @@
       }
       a.appendChild(info);
       if (read.has(it.url)) addReadFlag(a);
+      if (it.img) {
+        const img = document.createElement('img');
+        img.src = it.img;
+        img.alt = '';
+        img.loading = 'lazy';
+        a.appendChild(img);
+      }
       uolList.appendChild(a);
     }
     if (pool.length > page.length) {
