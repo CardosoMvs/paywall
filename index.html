@@ -147,11 +147,11 @@
     const para = [];
     const inline = (t) => {
       t = esc(t);
-      t = t.replace(/!\[([^\]]*)\]\(((?:[^()]|\([^()]*\))+)\)/g, (m, alt, src) => {
+      t = t.replace(/!\[([^\]]*)\]\(\s*((?:[^()\s]|\([^()\s]*\))+)(?:\s+(?:&quot;.*?&quot;|&#39;.*?&#39;))?\s*\)/g, (m, alt, src) => {
         const u = safeUrl(src, true);
         return u ? `<img alt="${alt}" src="${u}" loading="lazy">` : '';
       });
-      t = t.replace(/\[([^\]]+)\]\(((?:[^()]|\([^()]*\))+)\)/g, (m, label, href) => {
+      t = t.replace(/\[((?:[^\[\]]|\[[^\[\]]*\])*)\]\(\s*((?:[^()\s]|\([^()\s]*\))+)(?:\s+(?:&quot;.*?&quot;|&#39;.*?&#39;))?\s*\)/g, (m, label, href) => {
         const u = safeUrl(href, false);
         return u ? `<a href="${u}" target="_blank" rel="noopener noreferrer">${label}</a>` : label;
       });
@@ -197,6 +197,36 @@
     return h ? h[1].trim() : null;
   }
 
+  // Sites em que o Jina precisa de um seletor para não trazer menu/rodapé
+  const SITE_SELECTORS = [
+    { host: /(^|\.)folha\.uol\.com\.br$/i, selector: '.c-news__body' }
+  ];
+
+  function targetSelectorFor(url) {
+    try {
+      const host = new URL(url).hostname;
+      const rule = SITE_SELECTORS.find(r => r.host.test(host));
+      return rule ? rule.selector : null;
+    } catch { return null; }
+  }
+
+  async function fetchArticle(url) {
+    const endpoint = 'https://r.jina.ai/' + url;
+    const get = async (headers) => {
+      const res = await fetch(endpoint, { headers });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.text();
+    };
+    const selector = targetSelectorFor(url);
+    if (!selector) return get({ 'Accept': 'text/plain' });
+    const targeted = await get({ 'Accept': 'text/plain', 'X-Target-Selector': selector });
+    // Se o seletor não achar conteúdo, volta para a leitura completa
+    if (targeted.split('Markdown Content:').pop().trim().length < 400) {
+      return get({ 'Accept': 'text/plain' });
+    }
+    return targeted;
+  }
+
   // --- Carregar artigo ---
   async function load() {
     const url = input.value.trim();
@@ -205,9 +235,7 @@
     status.textContent = 'Extraindo… (pode levar alguns segundos)';
     goBtn.disabled = true;
     try {
-      const res = await fetch('https://r.jina.ai/' + url, { headers: { 'Accept': 'text/plain' } });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      const text = await res.text();
+      const text = await fetchArticle(url);
       if (!text || text.length < 200) throw new Error('Conteúdo muito curto ou vazio');
       const title = extractTitle(text) || url;
       output.innerHTML = mdToHtml(text);
