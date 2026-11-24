@@ -94,6 +94,12 @@
   #output img { cursor: zoom-in; }
   .article-head .share-btn { background: none; border: 0; padding: 0; color: var(--muted); font-size: 13px; cursor: pointer; margin-left: 10px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
   .article-head .share-btn:hover { text-decoration: underline; }
+  .source-badge { display: inline-block; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; padding: 2px 7px; border-radius: 5px; margin-right: 8px; vertical-align: 1px; }
+  .source-badge.folha { background: #f6e3e3; color: #9b1c1c; }
+  .source-badge.uol { background: #fdf3d7; color: #7a5a00; }
+  .source-badge.other { background: #eceff3; color: #445; }
+  .news-source { display: flex; align-items: center; gap: 8px; }
+  .news-source .row-label { margin: 0; }
   #status .retry { background: transparent; color: var(--muted); border: 1px solid var(--line); font-size: 12px; padding: 4px 8px; margin-top: 6px; }
   #status a { color: var(--muted); font-size: 12px; }
   .filters-line { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
@@ -196,7 +202,7 @@
 
 <div id="newsView" class="hidden">
   <div class="news-top">
-    <div class="row-label">Seções</div>
+    <div class="news-source"><span class="source-badge folha">Folha</span><span class="row-label">Seções</span></div>
     <button id="newsRefresh" class="refresh" type="button" title="Atualizar notícias">↻ Atualizar</button>
   </div>
   <div class="sections" id="newsSections"></div>
@@ -254,7 +260,12 @@
     h.forEach(item => {
       const a = document.createElement('a');
       a.href = '#';
-      a.textContent = item.title;
+      const info = sourceInfo(item.url);
+      const badge = document.createElement('span');
+      badge.className = 'source-badge ' + info.kind;
+      badge.textContent = info.label;
+      a.appendChild(badge);
+      a.appendChild(document.createTextNode(' ' + item.title));
       a.title = item.url;
       a.onclick = (e) => { e.preventDefault(); input.value = item.url; load(); };
       historyList.appendChild(a);
@@ -503,6 +514,15 @@
   }
 
   // --- Compartilhar, zoom de imagem e cache de artigos ---
+  function sourceInfo(url) {
+    try {
+      const host = new URL(url).hostname.replace(/^www\d*\./i, '');
+      if (/(^|\.)folha\.uol\.com\.br$/i.test(host)) return { label: 'Folha', host: host, kind: 'folha' };
+      if (/(^|\.)uol\.com\.br$/i.test(host)) return { label: 'UOL', host: host, kind: 'uol' };
+      return { label: host, host: host, kind: 'other' };
+    } catch { return { label: 'site', host: '', kind: 'other' }; }
+  }
+
   const ART_KEY = 'leitor_limpo_articles_v1';
 
   function readArtCache(url) {
@@ -584,6 +604,11 @@
       sub.textContent = subtitle;
       head.appendChild(sub);
     }
+    const info = sourceInfo(url);
+    const badge = document.createElement('span');
+    badge.className = 'source-badge ' + info.kind;
+    badge.textContent = info.label;
+    head.appendChild(badge);
     head.appendChild(src);
     const share = document.createElement('button');
     share.type = 'button';
