@@ -108,6 +108,9 @@
   .news-item.read img { opacity: .6; }
   .news-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 7px; }
   .news-top .row-label { margin: 0; }
+  .periods { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 12px; }
+  .periods button { background: transparent; border: 1px solid var(--line); color: var(--muted); border-radius: 999px; padding: 4px 10px; font-size: 12px; }
+  .periods button.active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
   .refresh { background: transparent; color: var(--muted); border: none; font-size: 12px; padding: 2px 4px; }
   .refresh:hover { color: var(--fg); }
   #output a { color: inherit; }
@@ -177,6 +180,7 @@
     <div class="row-label" id="subsLabel">Tópicos</div>
     <div class="sections subs" id="newsSubs"></div>
   </div>
+  <div class="periods" id="newsPeriods"></div>
   <div id="newsStatus" class="hint"></div>
   <div id="newsList"></div>
 </div>
@@ -569,8 +573,25 @@
   const newsSections = $('newsSections'), newsSubs = $('newsSubs');
   const subsRow = $('subsRow'), subsLabel = $('subsLabel');
   const newsStatus = $('newsStatus'), newsList = $('newsList');
-  const NEWS_KEY = 'leitor_limpo_news_v2_';
+  const NEWS_KEY = 'leitor_limpo_news_v3_';
   const READ_KEY = 'leitor_limpo_read_v1';
+  const PERIOD_KEY = 'leitor_limpo_period_v1';
+  const PERIODS = [
+    { label: '1h', ms: 3600e3 },
+    { label: '3h', ms: 3 * 3600e3 },
+    { label: '6h', ms: 6 * 3600e3 },
+    { label: '12h', ms: 12 * 3600e3 },
+    { label: '24h', ms: 24 * 3600e3 },
+    { label: '7d', ms: 7 * 24 * 3600e3 },
+    { label: 'Tudo', ms: 0 }
+  ];
+  const periodsBox = $('newsPeriods');
+  let periodMs = 24 * 3600e3;
+  try {
+    const saved = parseInt(localStorage.getItem(PERIOD_KEY), 10);
+    if (PERIODS.some(p => p.ms === saved)) periodMs = saved;
+  } catch {}
+  let currentItems = [];
   let currentSection = 'ultimas';
   let currentFeed = { url: '', label: '' };
   let currentTopics = [];
@@ -608,6 +629,34 @@
     b.onclick = () => selectSection(s.id);
     newsSections.appendChild(b);
   });
+
+  PERIODS.forEach(p => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = p.label;
+    b.dataset.ms = p.ms;
+    b.onclick = () => {
+      periodMs = p.ms;
+      try { localStorage.setItem(PERIOD_KEY, periodMs); } catch {}
+      highlightPeriod();
+      if (currentItems.length) renderNews(currentItems);
+    };
+    periodsBox.appendChild(b);
+  });
+  function highlightPeriod() {
+    for (const b of periodsBox.children) b.classList.toggle('active', +b.dataset.ms === periodMs);
+  }
+  highlightPeriod();
+
+  function filterByPeriod(items) {
+    if (!periodMs) return items;
+    const now = Date.now();
+    return items.filter(it => it.ts && now - it.ts <= periodMs);
+  }
+  function periodLabel() {
+    const p = PERIODS.find(x => x.ms === periodMs);
+    return !p || !p.ms ? 'tudo' : 'últimas ' + p.label;
+  }
 
   function selectSection(id) {
     currentSection = id;
@@ -821,25 +870,37 @@
         .replace(/\s+/g, ' ')
         .trim();
       if (text.length < 12) continue;
-      const dm = text.match(/(\d{2}\.[a-z]{3}\.\d{4}\s+às\s+\d{1,2}h\d{2})\s*$/i);
-      const date = dm ? fmtNewsDate(dm[1]) : '';
-      if (dm) text = text.slice(0, dm.index).trim();
+      const dm = text.match(/(\d{2})\.([a-z]{3})\.(\d{4})\s+às\s+(\d{1,2})h(\d{2})\s*$/i);
+      const date = dm ? fmtNewsDate(dm[0]) : '';
+      let ts = 0;
+      if (dm) {
+        const mo = parseInt(MONTHS[dm[2].toLowerCase()] || '', 10);
+        if (mo) ts = new Date(+dm[3], mo - 1, +dm[1], +dm[4], +dm[5]).getTime();
+        text = text.slice(0, dm.index).trim();
+      }
       if (!text) continue;
       seen.add(url);
       const split = splitHeadline(text, url);
       const img = thumbs[url] || '';
-      items.push({ title: split.title, subtitle: split.subtitle, url, date, img: /^https:\/\//.test(img) ? img : '' });
-      if (items.length >= 30) break;
+      items.push({ title: split.title, subtitle: split.subtitle, url, date, ts, img: /^https:\/\//.test(img) ? img : '' });
+      if (items.length >= 100) break;
     }
     return items;
   }
 
   function renderNews(items) {
+    currentItems = items;
+    const shown = filterByPeriod(items);
     newsList.innerHTML = '';
-    if (!items.length) { newsStatus.textContent = 'Nenhuma notícia encontrada.'; return; }
-    newsStatus.textContent = items.length + ' notícias · toque para ler';
+    if (!shown.length) {
+      newsStatus.textContent = items.length
+        ? 'Nenhuma notícia em ' + periodLabel() + ' · amplie o período'
+        : 'Nenhuma notícia encontrada.';
+      return;
+    }
+    newsStatus.textContent = shown.length + (shown.length === 1 ? ' notícia · ' : ' notícias · ') + periodLabel() + ' · toque para ler';
     const read = getRead();
-    for (const it of items) {
+    for (const it of shown) {
       const a = document.createElement('a');
       a.className = 'news-item';
       a.href = it.url;
