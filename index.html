@@ -75,6 +75,8 @@
   .article-head { margin-bottom: 18px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
   .article-head h1 { margin: 0 0 6px; line-height: 1.25; }
   .article-head a { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 13px; color: var(--muted); }
+  .article-head .back-news { background: none; border: 0; padding: 0; margin: 0 0 8px; color: var(--muted); font-size: 13px; cursor: pointer; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .article-head .back-news:hover { text-decoration: underline; }
   .to-top { position: fixed; right: 16px; bottom: 68px; width: 44px; height: 44px; border-radius: 50%; padding: 0; font-size: 18px; box-shadow: 0 2px 10px rgba(0,0,0,.18); }
   .read-footer { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; display: flex; justify-content: center; gap: 6px;
     padding: 8px 16px calc(8px + env(safe-area-inset-bottom));
@@ -98,8 +100,15 @@
   .news-item:hover .news-title { text-decoration: underline; }
   .news-info { flex: 1; min-width: 0; }
   .news-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 16px; line-height: 1.4; }
+  .news-sub { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 13px; line-height: 1.4; color: var(--muted); margin-top: 3px; }
   .news-date { display: block; font-size: 12px; color: var(--muted); margin-top: 4px; }
   .news-item img { width: 86px; height: 58px; object-fit: cover; border-radius: 6px; flex: none; }
+  .news-item.read .news-title { color: var(--muted); }
+  .news-item.read img { opacity: .6; }
+  .news-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 7px; }
+  .news-top .row-label { margin: 0; }
+  .refresh { background: transparent; color: var(--muted); border: none; font-size: 12px; padding: 2px 4px; }
+  .refresh:hover { color: var(--fg); }
   #output a { color: inherit; }
   #output h1, #output h2, #output h3 { line-height: 1.25; margin-top: 1.4em; }
   #output pre, #output code { background: rgba(127,127,127,.12); padding: 2px 4px; border-radius: 4px; font-size: 14px; overflow-x: auto; }
@@ -158,7 +167,10 @@
 </div>
 
 <div id="newsView" class="hidden">
-  <div class="row-label">Seções</div>
+  <div class="news-top">
+    <div class="row-label">Seções</div>
+    <button id="newsRefresh" class="refresh" type="button" title="Atualizar notícias">↻ Atualizar</button>
+  </div>
   <div class="sections" id="newsSections"></div>
   <div class="subs-row hidden" id="subsRow">
     <div class="row-label" id="subsLabel">Tópicos</div>
@@ -215,6 +227,7 @@
   };
   $('confirmYes').onclick = () => {
     localStorage.removeItem(KEY);
+    localStorage.removeItem(READ_KEY);
     renderHistory();
     confirmClear.classList.add('hidden');
   };
@@ -419,6 +432,11 @@
     if (/^\s*<h1/i.test(output.innerHTML)) return;
     const head = document.createElement('header');
     head.className = 'article-head';
+    const back = document.createElement('button');
+    back.type = 'button';
+    back.className = 'back-news';
+    back.textContent = '← Notícias';
+    back.onclick = () => showView('news');
     const h = document.createElement('h1');
     h.textContent = title;
     let host = '';
@@ -428,7 +446,7 @@
     src.target = '_blank';
     src.rel = 'noopener';
     src.textContent = 'Abrir no site' + (host ? ' · ' + host : '');
-    head.append(h, src);
+    head.append(back, h, src);
     output.prepend(head);
   }
 
@@ -485,18 +503,32 @@
   const newsSections = $('newsSections'), newsSubs = $('newsSubs');
   const subsRow = $('subsRow'), subsLabel = $('subsLabel');
   const newsStatus = $('newsStatus'), newsList = $('newsList');
-  const NEWS_KEY = 'leitor_limpo_news_v1_';
+  const NEWS_KEY = 'leitor_limpo_news_v2_';
+  const READ_KEY = 'leitor_limpo_read_v1';
   let currentSection = 'ultimas';
   let currentFeed = { url: '', label: '' };
   let currentTopics = [];
   let newsStarted = false;
+  let newsScroll = 0;
+
+  function getRead() {
+    try { return new Set(JSON.parse(localStorage.getItem(READ_KEY) || '[]')); } catch { return new Set(); }
+  }
+  function markRead(url) {
+    const s = getRead();
+    s.add(url);
+    try { localStorage.setItem(READ_KEY, JSON.stringify(Array.from(s).slice(-500))); } catch {}
+  }
 
   function showView(name) {
+    const fromNews = !newsView.classList.contains('hidden');
+    if (name === 'reader' && fromNews) newsScroll = window.scrollY;
     readerView.classList.toggle('hidden', name !== 'reader');
     newsView.classList.toggle('hidden', name !== 'news');
     tabReader.classList.toggle('active', name === 'reader');
     tabNews.classList.toggle('active', name === 'news');
     if (name === 'news' && !newsStarted) { newsStarted = true; selectSection(currentSection); }
+    if (name === 'news' && !fromNews) requestAnimationFrame(() => window.scrollTo(0, newsScroll));
     updateReadingProgress();
   }
   tabReader.onclick = () => showView('reader');
@@ -525,6 +557,14 @@
     currentFeed = { url, label };
     openFeed();
   }
+
+  $('newsRefresh').onclick = () => {
+    try { localStorage.removeItem(NEWS_KEY + encodeURIComponent(currentFeed.url)); } catch {}
+    newsSubs.innerHTML = '';
+    subsRow.classList.add('hidden');
+    newsStatus.textContent = 'Atualizando…';
+    loadNews(currentFeed, SECTIONS.find(s => s.id === currentSection).url);
+  };
 
   function openFeed() {
     const sec = SECTIONS.find(s => s.id === currentSection);
@@ -658,7 +698,44 @@
 
   function fmtNewsDate(s) {
     const m = s.match(/(\d{2})\.([a-z]{3})\.(\d{4})\s+às\s+(\d{1,2})h(\d{2})/i);
-    return m ? m[1] + '/' + (MONTHS[m[2].toLowerCase()] || '') + ' ' + m[4] + 'h' + m[5] : '';
+    if (!m) return '';
+    const mm = MONTHS[m[2].toLowerCase()] || '';
+    const hh = m[4] + 'h' + m[5];
+    const now = new Date();
+    if (+m[1] === now.getDate() && +mm === now.getMonth() + 1) return 'hoje ' + hh;
+    const y = new Date(now);
+    y.setDate(y.getDate() - 1);
+    if (+m[1] === y.getDate() && +mm === y.getMonth() + 1) return 'ontem ' + hh;
+    return m[1] + '/' + mm + ' ' + hh;
+  }
+
+  // Separa manchete e subtítulo usando o slug da URL como âncora
+  function splitHeadline(text, url) {
+    const none = { title: text, subtitle: '' };
+    let slug = '';
+    try { slug = new URL(url).pathname.split('/').pop().replace(/\.shtml$/, ''); } catch { return none; }
+    const tokensOf = (s) => (s.normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().match(/[a-z0-9]+/g) || []);
+    const slugTokens = tokensOf(slug);
+    if (!slugTokens.length) return none;
+    const words = [];
+    const re = /\S+/g;
+    let m;
+    while ((m = re.exec(text))) words.push({ start: m.index, end: m.index + m[0].length, toks: tokensOf(m[0]) });
+    const flat = [];
+    words.forEach((w, wi) => w.toks.forEach(t => flat.push([t, wi])));
+    const n = slugTokens.length;
+    for (let i = 0; i + n <= flat.length; i++) {
+      let ok = true;
+      for (let j = 0; j < n; j++) if (flat[i + j][0] !== slugTokens[j]) { ok = false; break; }
+      if (!ok) continue;
+      const start = words[flat[i][1]].start;
+      const end = words[flat[i + n - 1][1]].end;
+      const title = text.slice(start, end).replace(/[\s,;:.!?-]+$/, '').trim();
+      const subtitle = text.slice(end).replace(/^[\s,;:.!?-]+/, '').trim();
+      if (title.length >= 10) return { title, subtitle };
+      break;
+    }
+    return none;
   }
 
   function parseNews(md) {
@@ -683,8 +760,9 @@
       if (dm) text = text.slice(0, dm.index).trim();
       if (!text) continue;
       seen.add(url);
+      const split = splitHeadline(text, url);
       const img = thumbs[url] || '';
-      items.push({ title: text, url, date, img: /^https:\/\//.test(img) ? img : '' });
+      items.push({ title: split.title, subtitle: split.subtitle, url, date, img: /^https:\/\//.test(img) ? img : '' });
       if (items.length >= 30) break;
     }
     return items;
@@ -694,17 +772,25 @@
     newsList.innerHTML = '';
     if (!items.length) { newsStatus.textContent = 'Nenhuma notícia encontrada.'; return; }
     newsStatus.textContent = items.length + ' notícias · toque para ler';
+    const read = getRead();
     for (const it of items) {
       const a = document.createElement('a');
       a.className = 'news-item';
       a.href = it.url;
-      a.onclick = (e) => { e.preventDefault(); input.value = it.url; showView('reader'); load(); };
+      if (read.has(it.url)) a.classList.add('read');
+      a.onclick = (e) => { e.preventDefault(); markRead(it.url); a.classList.add('read'); input.value = it.url; showView('reader'); load(); };
       const info = document.createElement('div');
       info.className = 'news-info';
       const title = document.createElement('span');
       title.className = 'news-title';
       title.textContent = it.title;
       info.appendChild(title);
+      if (it.subtitle) {
+        const sub = document.createElement('span');
+        sub.className = 'news-sub';
+        sub.textContent = it.subtitle;
+        info.appendChild(sub);
+      }
       if (it.date) {
         const date = document.createElement('span');
         date.className = 'news-date';
