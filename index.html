@@ -5,14 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Leitor Limpo</title>
 
-<!-- PWA: manifest inline via data URL (Chrome aceita) -->
-<link rel="manifest" href='data:application/manifest+json,{"name":"Leitor Limpo","short_name":"Leitor","start_url":".","display":"standalone","background_color":"%23ffffff","theme_color":"%23111111","icons":[{"src":"data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 192 192%27%3E%3Crect width=%27192%27 height=%27192%27 fill=%27%23111%27/%3E%3Ctext x=%2796%27 y=%27120%27 font-size=%2790%27 text-anchor=%27middle%27 fill=%27white%27 font-family=%27sans-serif%27%3EL%3C/text%3E%3C/svg%3E","sizes":"192x192","type":"image/svg+xml"}]}'>
+<!-- PWA -->
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#111111">
+<link rel="icon" href="icon-192.png" sizes="192x192" type="image/png">
 
 <!-- iOS -->
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Leitor">
-<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' fill='%23111'/%3E%3Ctext x='90' y='115' font-size='85' text-anchor='middle' fill='white' font-family='sans-serif'%3EL%3C/text%3E%3C/svg%3E">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 
 <style>
   :root { --bg:#fff; --fg:#111; --muted:#666; --line:#e5e5e5; --accent:#111; }
@@ -63,7 +65,7 @@
 <h1>Leitor Limpo</h1>
 
 <div class="row">
-  <input type="url" id="url" placeholder="Cole a URL do artigo" autocomplete="off" autocapitalize="off" spellcheck="false">
+  <input type="url" id="url" placeholder="Cole a URL do artigo" aria-label="URL do artigo" enterkeyhint="go" autocomplete="off" autocapitalize="off" spellcheck="false">
   <button id="go">Ler</button>
 </div>
 
@@ -117,41 +119,73 @@
   $('btnClear').onclick = () => { localStorage.removeItem(KEY); renderHistory(); };
 
   // --- Markdown mínimo -> HTML (r.jina.ai retorna Markdown) ---
-  function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-  function mdToHtml(md) {
-    // Remove bloco de metadados do Jina (Title:, URL Source:, Markdown Content:)
-    md = md.replace(/^Title:\s*/m, '').replace(/^URL Source:\s*.*$/m, '').replace(/^Markdown Content:\s*$/m, '');
+  function esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  // Só deixa passar URLs seguras (bloqueia javascript:, data:, vbscript: etc.)
+  function safeUrl(u, forImage) {
+    const s = String(u).trim();
+    if (/^https?:\/\//i.test(s)) return s;
+    if (!forImage && (/^mailto:/i.test(s) || !/^[a-z][a-z0-9+.-]*:/i.test(s))) return s;
+    return null;
+  }
+
+  // Remove o bloco de metadados que o r.jina.ai coloca no topo
+  function stripJinaMeta(md) {
+    const meta = /^(Title|URL Source|Published Time|Markdown Content|Warning):/;
     const lines = md.split('\n');
-    let html = '', inCode = false, para = [];
-    const flushPara = () => {
-      if (para.length) { html += '<p>' + inline(para.join(' ')) + '</p>'; para = []; }
-    };
+    let i = 0;
+    while (i < lines.length && (lines[i].trim() === '' || meta.test(lines[i]))) i++;
+    return lines.slice(i);
+  }
+
+  function mdToHtml(md) {
+    const lines = stripJinaMeta(String(md).replace(/\r\n?/g, '\n'));
+    let html = '', inCode = false, inList = false;
+    const para = [];
     const inline = (t) => {
       t = esc(t);
-      t = t.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img alt="$1" src="$2">');
-      t = t.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+      t = t.replace(/!\[([^\]]*)\]\(((?:[^()]|\([^()]*\))+)\)/g, (m, alt, src) => {
+        const u = safeUrl(src, true);
+        return u ? `<img alt="${alt}" src="${u}" loading="lazy">` : '';
+      });
+      t = t.replace(/\[([^\]]+)\]\(((?:[^()]|\([^()]*\))+)\)/g, (m, label, href) => {
+        const u = safeUrl(href, false);
+        return u ? `<a href="${u}" target="_blank" rel="noopener noreferrer">${label}</a>` : label;
+      });
       t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
       t = t.replace(/\*([^*]+)\*/g, '<em>$1</em>');
       t = t.replace(/`([^`]+)`/g, '<code>$1</code>');
       return t;
     };
-    for (const raw of lines) {
-      const line = raw;
-      if (/^```/.test(line)) { flushPara(); inCode = !inCode; html += inCode ? '<pre>' : '</pre>'; continue; }
+    const flushPara = () => {
+      if (para.length) { html += '<p>' + inline(para.join(' ')) + '</p>'; para.length = 0; }
+    };
+    const closeList = () => { if (inList) { html += '</ul>'; inList = false; } };
+    for (const line of lines) {
+      if (/^```/.test(line)) { flushPara(); closeList(); inCode = !inCode; html += inCode ? '<pre>' : '</pre>'; continue; }
       if (inCode) { html += esc(line) + '\n'; continue; }
       if (/^#{1,6}\s/.test(line)) {
-        flushPara();
+        flushPara(); closeList();
         const m = line.match(/^(#{1,6})\s+(.*)$/);
         html += `<h${m[1].length}>${inline(m[2])}</h${m[1].length}>`;
         continue;
       }
-      if (/^\s*[-*+]\s/.test(line)) { flushPara(); html += '<li>' + inline(line.replace(/^\s*[-*+]\s/, '')) + '</li>'; continue; }
-      if (/^\s*>\s/.test(line)) { flushPara(); html += '<blockquote>' + inline(line.replace(/^\s*>\s/, '')) + '</blockquote>'; continue; }
-      if (/^---+$/.test(line.trim())) { flushPara(); html += '<hr>'; continue; }
+      if (/^\s*[-*+]\s/.test(line)) {
+        flushPara();
+        if (!inList) { html += '<ul>'; inList = true; }
+        html += '<li>' + inline(line.replace(/^\s*[-*+]\s+/, '')) + '</li>';
+        continue;
+      }
+      if (/^\s*>\s/.test(line)) { flushPara(); closeList(); html += '<blockquote>' + inline(line.replace(/^\s*>\s?/, '')) + '</blockquote>'; continue; }
+      if (/^---+$/.test(line.trim())) { flushPara(); closeList(); html += '<hr>'; continue; }
       if (line.trim() === '') { flushPara(); continue; }
+      flushPara(); closeList();
       para.push(line.trim());
     }
-    flushPara();
+    flushPara(); closeList();
     if (inCode) html += '</pre>';
     return html;
   }
