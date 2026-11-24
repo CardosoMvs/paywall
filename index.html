@@ -32,8 +32,6 @@
   .brand img { width: 28px; height: 28px; border-radius: 7px; }
   .topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
   .topbar h1 { margin: 0; }
-  .home-btn { width: 32px; height: 32px; padding: 0; border-radius: 8px; background: var(--accent); color: var(--bg); display: inline-flex; align-items: center; justify-content: center; flex: none; }
-  .home-btn:hover { opacity: .85; }
   .row { display: flex; gap: 8px; }
   input[type=url] {
     flex: 1; font-size: 16px; padding: 12px; border: 1px solid var(--line);
@@ -47,6 +45,8 @@
   .actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
   .actions button { font-size: 13px; padding: 8px 12px; background: transparent; color: var(--muted); border: 1px solid var(--line); }
   .actions button svg { vertical-align: -2px; margin-right: 5px; }
+  .actions button.icon-btn { padding: 8px 10px; }
+  .actions button.icon-btn svg { margin-right: 0; display: block; }
   .confirm { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; font-size: 13px; }
   .confirm.hidden { display: none; }
   .confirm button { font-size: 12px; padding: 6px 10px; }
@@ -111,9 +111,6 @@
 
 <div class="topbar">
   <h1 class="brand"><img src="icon-192.png" alt="" width="28" height="28">Leitor Limpo</h1>
-  <button id="btnHome" class="home-btn" type="button" aria-label="Ir para o início" title="Início">
-    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M3 11l9-8 9 8M5 10v10h5v-6h4v6h5V10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
-  </button>
 </div>
 
 <nav class="tabs">
@@ -130,6 +127,7 @@
 
 <div class="actions">
   <button id="btnClear"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M4 6h16M9 6V4h6v2M18 6l-1 14H7L6 6M10 11v5M14 11v5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>Limpar histórico</button>
+  <button id="btnHome" class="icon-btn" type="button" aria-label="Ir para o início" title="Início"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M3 11l9-8 9 8M5 10v10h5v-6h4v6h5V10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
   <button id="fontMinus" type="button" aria-label="Diminuir fonte">A−</button>
   <button id="fontPlus" type="button" aria-label="Aumentar fonte">A+</button>
 </div>
